@@ -3,6 +3,7 @@ mod image_proc;
 mod terminal;
 mod filter;
 mod grouping;
+mod ai_tagging;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -10,6 +11,8 @@ use image_proc::{expand_directories, validate_images_concurrent, process_images_
 use filename::FilenameMode;
 use filter::{FilterConfig, parse_orientation, parse_file_size};
 use grouping::{GroupBy, group_images};
+use ai_tagging::{AITaggingConfig, tag_images_parallel, clear_ai_cache};
+use std::path::Path as StdPath;
 use std::process::Command;
 use std::io::{self, Write};
 
@@ -92,6 +95,15 @@ struct Args {
     /// Filter by specific tag (can be used multiple times)
     #[arg(long)]
     tag: Vec<String>,
+
+    // AI tagging options
+    /// Generate AI tags for images (requires LSIX_AI_API_KEY)
+    #[arg(long)]
+    ai_tag: bool,
+
+    /// Clear AI tag cache
+    #[arg(long)]
+    clear_ai_cache: bool,
 }
 
 /// Cleanup handler to stop SIXEL and reset terminal
@@ -141,6 +153,14 @@ fn main() -> Result<()> {
     let term_config = terminal::autodetect()
         .context("Terminal auto-detection failed")?;
 
+    // Handle --clear-ai-cache
+    if args.clear_ai_cache {
+        let ai_config = AITaggingConfig::default();
+        clear_ai_cache(&ai_config)?;
+        cleanup();
+        return Ok(());
+    }
+
     // Get list of image files
     let image_paths = if args.files.is_empty() {
         // No arguments - find images in current directory
@@ -153,6 +173,63 @@ fn main() -> Result<()> {
 
     if image_paths.is_empty() {
         eprintln!("No image files found.");
+        cleanup();
+        return Ok(());
+    }
+
+    // Handle --ai-tag option
+    if args.ai_tag {
+        let ai_config = AITaggingConfig::default();
+
+        if ai_config.api_key.is_empty() {
+            eprintln!("Error: LSIX_AI_API_KEY environment variable not set!");
+            eprintln!("\nTo use AI tagging, set your API key:");
+            eprintln!("  export LSIX_AI_API_KEY='your-api-key-here'");
+            eprintln!("\nOptional configuration:");
+            eprintln!("  export LSIX_AI_ENDPOINT='https://api.openai.com/v1/chat/completions'");
+            eprintln!("  export LSIX_AI_MODEL='gpt-4o-mini'");
+            eprintln!("\nSupported: OpenAI (GPT-4, GPT-4o), Anthropic (Claude), or compatible APIs");
+            cleanup();
+            return Ok(());
+        }
+
+        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
+        eprintln!("║                    AI Auto-Tagging Images                                    ║");
+        eprintln!("╚════════════════════════════════════════════════════════════════════════════╝\n");
+
+        eprintln!("Model: {}", ai_config.model);
+        eprintln!("API Endpoint: {}", ai_config.api_endpoint);
+        eprintln!("Max tags per image: {}", ai_config.max_tags);
+        eprintln!("Images to process: {}\n", image_paths.len());
+
+        eprintln!("This may take a moment... (cached images will be faster)\n");
+
+        // Tag all images with AI
+        let ai_tags_map = tag_images_parallel(&image_paths, &ai_config)
+            .context("AI tagging failed")?;
+
+        eprintln!("\n✓ AI tagging complete!");
+        eprintln!("  Total images tagged: {}", ai_tags_map.len());
+        eprintln!("  Cache location: {:?}", ai_config.cache_dir);
+
+        // Display all generated tags
+        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
+        eprintln!("║                    Generated Tags                                            ║");
+        eprintln!("╚════════════════════════════════════════════════════════════════════════════╝\n");
+
+        for (path, tags) in ai_tags_map.iter() {
+            if let Some(name) = StdPath::new(path).file_name() {
+                eprintln!("{}:", name.to_string_lossy());
+                eprintln!("  Tags: {}\n", tags.tags.join(", "));
+            }
+        }
+
+        eprintln!("💡 Tips:");
+        eprintln!("  - Tags are cached for 30 days");
+        eprintln!("  - Use --tag <TAG> to filter by AI-generated tag");
+        eprintln!("  - Use --clear-ai-cache to clear cache and regenerate");
+        eprintln!("  - API costs vary by provider (gpt-4o-mini is cost-effective)\n");
+
         cleanup();
         return Ok(());
     }
