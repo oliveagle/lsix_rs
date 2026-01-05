@@ -4,6 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use crate::filter::ImageFeatures;
 use crate::image_proc::ImageEntry;
+use crate::ai_tagging::{AITags, AITaggingConfig};
 
 /// Group ID type
 pub type GroupId = String;
@@ -559,10 +560,40 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
 
     // Collect all tags and their counts
     let mut tag_counts: HashMap<String, usize> = HashMap::new();
+    let mut tag_sources: HashMap<String, usize> = HashMap::new(); // Track AI vs filename tags
     let mut tag_files: HashMap<String, Vec<String>> = HashMap::new();
+    let mut images_with_ai_tags = 0;
+    let mut images_with_filename_tags = 0;
 
     for path in image_paths {
-        let tags = extract_tags(path);
+        let mut tags = Vec::new();
+        let mut has_ai_tags = false;
+
+        // Try to load AI-generated tags first
+        if let Ok(ai_tags) = load_ai_tags(path) {
+            has_ai_tags = true;
+            images_with_ai_tags += 1;
+            tags.extend(ai_tags.tags.clone());
+
+            // Mark these as AI tags
+            for tag in &ai_tags.tags {
+                *tag_sources.entry(tag.clone()).or_insert(0) |= 1; // Bit 1: AI tag
+            }
+        }
+
+        // Also extract from filename (always available)
+        let filename_tags = extract_tags(path);
+        if !filename_tags.is_empty() {
+            images_with_filename_tags += 1;
+        }
+
+        // Mark filename tags
+        for tag in &filename_tags {
+            *tag_sources.entry(tag.clone()).or_insert(0) |= 2; // Bit 2: Filename tag
+        }
+
+        tags.extend(filename_tags);
+
         for tag in tags {
             *tag_counts.entry(tag.clone()).or_insert(0) += 1;
             tag_files.entry(tag).or_insert_with(Vec::new).push(path.clone());
@@ -570,10 +601,24 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
     }
 
     if tag_counts.is_empty() {
-        eprintln!("No tags found in image filenames/paths.");
-        eprintln!("💡 Tip: Rename your files with descriptive names (e.g., vacation_beach_001.jpg)");
+        eprintln!("No tags found.");
+        eprintln!("💡 Tips:");
+        eprintln!("  - Run 'lsix --ai-tag <directory>' to generate AI tags");
+        eprintln!("  - Or rename files with descriptive names (e.g., vacation_beach_001.jpg)");
         return Ok(());
     }
+
+    // Show tag source statistics
+    let total_images = image_paths.len();
+    eprintln!("Total images: {}\n", total_images);
+    eprintln!("Tag Source Statistics:");
+    eprintln!("  Images with AI tags: {} ({:.1}%)",
+             images_with_ai_tags,
+             (images_with_ai_tags as f32 / total_images as f32) * 100.0);
+    eprintln!("  Images with filename tags: {} ({:.1}%)",
+             images_with_filename_tags,
+             (images_with_filename_tags as f32 / total_images as f32) * 100.0);
+    eprintln!();
 
     // Sort tags
     let mut tags_vec: Vec<(String, usize)> = tag_counts.into_iter().collect();
@@ -588,20 +633,27 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
         .max()
         .unwrap_or(10);
 
-    // Calculate total images
-    let total_images = image_paths.len();
-
-    // Display statistics
-    eprintln!("Total images: {}\n", total_images);
     eprintln!("Tags found: {}\n", tags_vec.len());
 
-    eprintln!("{:<width$} {:>10}  {:>10}  {}", "Tag", "Count", "Percentage", "Example Files",
+    eprintln!("{:<width$} {:>8}  {:>10}  {:>12}  {}", "Tag", "Count", "Percentage", "Source", "Example Files",
              width = max_tag_len);
-    eprintln!("{:-<width$} {:>10}  {:>10}  {}", "─", "─", "─", "─",
+    eprintln!("{:-<width$} {:>8}  {:>10}  {:>12}  {}", "─", "─", "─", "─", "─",
              width = max_tag_len);
 
     for (tag, count) in &tags_vec {
         let percentage = (*count as f32 / total_images as f32) * 100.0;
+
+        // Determine tag source
+        let source = tag_sources.get(tag)
+            .map(|&bits| {
+                match bits {
+                    1 => "AI",
+                    2 => "Filename",
+                    3 => "Both",
+                    _ => "?",
+                }
+            })
+            .unwrap_or("?");
 
         // Show first few example files
         let examples = tag_files.get(tag)
@@ -620,11 +672,12 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
             })
             .unwrap_or_default();
 
-        eprintln!("{:<width$} {:>10}  {:>9.1}%  {}",
+        eprintln!("{:<width$} {:>8}  {:>9.1}%  {:>12}  {}",
                  tag,
                  count,
                  percentage,
-                 if examples.len() > 50 { &examples[..50] } else { &examples },
+                 source,
+                 if examples.len() > 45 { &examples[..45] } else { &examples },
                  width = max_tag_len);
     }
 
@@ -639,6 +692,16 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
     Ok(())
 }
 
+/// Load AI-generated tags from cache
+fn load_ai_tags(image_path: &str) -> Result<AITags> {
+    // Get cache directory from default config
+    let config = AITaggingConfig::default();
+    let cache_dir = config.cache_dir.ok_or_else(|| anyhow::anyhow!("Cache directory not configured"))?;
+
+    // Load cached tags using ai_tagging module
+    crate::ai_tagging::load_cached_tags(&cache_dir, image_path)
+}
+
 /// Filter images by specific tags (OR logic - match any tag)
 pub fn filter_by_tags(images: Vec<ImageEntry>, tags: &[String]) -> Result<Vec<ImageEntry>> {
     if tags.is_empty() {
@@ -648,7 +711,14 @@ pub fn filter_by_tags(images: Vec<ImageEntry>, tags: &[String]) -> Result<Vec<Im
     // Collect all valid image paths that have matching tags
     let filtered_paths: Vec<String> = images.iter()
         .filter(|img| {
-            let image_tags = extract_tags(&img.path);
+            // Try to get tags from multiple sources
+            let mut image_tags = extract_tags(&img.path);
+
+            // Also try to load AI-generated tags
+            if let Ok(ai_tags) = load_ai_tags(&img.path) {
+                image_tags.extend(ai_tags.tags);
+            }
+
             // Check if any of the requested tags match
             tags.iter().any(|requested_tag| {
                 image_tags.iter().any(|img_tag| {

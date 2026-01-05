@@ -562,16 +562,17 @@ pub fn expand_directories(paths: &[String]) -> Vec<String> {
         let path_obj = std::path::Path::new(path);
 
         if path_obj.is_dir() {
-            // Recursively process directory
-            eprintln!("Recursing on {}", path);
+            // Process directory (non-recursive unless -r flag is used)
+            eprintln!("Scanning directory: {}", path);
 
             if let Ok(entries) = std::fs::read_dir(path) {
                 for entry in entries.filter_map(|e| e.ok()) {
-                    if let Some(path_str) = entry.path().to_str() {
-                        // Only add if it's a file with image extension
-                        if entry.path().is_file() {
-                            if let Some(ext) = entry.path().extension() {
-                                if image_extensions.contains(&ext.to_string_lossy().as_ref()) {
+                    let entry_path = entry.path();
+                    // Only add if it's a file with image extension
+                    if entry_path.is_file() {
+                        if let Some(ext) = entry_path.extension() {
+                            if image_extensions.contains(&ext.to_string_lossy().as_ref()) {
+                                if let Some(path_str) = entry_path.to_str() {
                                     result.push(path_str.to_string());
                                 }
                             }
@@ -589,6 +590,59 @@ pub fn expand_directories(paths: &[String]) -> Vec<String> {
         }
     }
 
+    result.sort();
+    result
+}
+
+/// Recursively find all images in directory tree
+pub fn expand_directories_recursive(paths: &[String]) -> Vec<String> {
+    let image_extensions = [
+        "jpg", "jpeg", "png", "gif", "webp", "tiff", "tif",
+        "pnm", "ppm", "pgm", "pbm", "pam", "xbm", "xpm", "bmp",
+        "ico", "svg", "eps",
+    ];
+
+    let mut result = Vec::new();
+
+    for path in paths {
+        let path_obj = std::path::Path::new(path);
+
+        if path_obj.is_dir() {
+            // Recursively process directory and all subdirectories
+            eprintln!("Recursively scanning: {}", path);
+
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let entry_path = entry.path();
+
+                    if entry_path.is_dir() {
+                        // Recurse into subdirectory
+                        let subdir_path = entry_path.to_string_lossy().to_string();
+                        let sub_result = expand_directories_recursive(&[subdir_path]);
+                        result.extend(sub_result);
+                    } else if entry_path.is_file() {
+                        // Check if it's an image file
+                        if let Some(ext) = entry_path.extension() {
+                            if image_extensions.contains(&ext.to_string_lossy().as_ref()) {
+                                if let Some(path_str) = entry_path.to_str() {
+                                    result.push(path_str.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // Regular file - check if it has image extension
+            if let Some(ext) = path_obj.extension() {
+                if image_extensions.contains(&ext.to_string_lossy().as_ref()) {
+                    result.push(path.clone());
+                }
+            }
+        }
+    }
+
+    result.sort();
     result
 }
 

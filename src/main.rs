@@ -7,7 +7,7 @@ mod ai_tagging;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use image_proc::{expand_directories, validate_images_concurrent, process_images_concurrent, process_images_grouped, ImageConfig};
+use image_proc::{expand_directories, expand_directories_recursive, validate_images_concurrent, process_images_concurrent, process_images_grouped, ImageConfig};
 use filename::FilenameMode;
 use filter::{FilterConfig, parse_orientation, parse_file_size};
 use grouping::{GroupBy, group_images};
@@ -96,6 +96,11 @@ struct Args {
     #[arg(long)]
     tag: Vec<String>,
 
+    // Directory options
+    /// Recursive directory search
+    #[arg(short, long)]
+    recursive: bool,
+
     // AI tagging options
     /// Generate AI tags for images (requires LSIX_AI_API_KEY)
     #[arg(long)]
@@ -104,6 +109,14 @@ struct Args {
     /// Clear AI tag cache
     #[arg(long)]
     clear_ai_cache: bool,
+
+    /// Force regenerate AI tags, ignoring cache
+    #[arg(long)]
+    force: bool,
+
+    /// Enable debug output for AI API calls
+    #[arg(long)]
+    debug: bool,
 }
 
 /// Cleanup handler to stop SIXEL and reset terminal
@@ -167,8 +180,11 @@ fn main() -> Result<()> {
         filename::find_image_files()
     } else {
         // Arguments provided - expand any directories
-        let expanded = expand_directories(&args.files);
-        expanded
+        if args.recursive {
+            expand_directories_recursive(&args.files)
+        } else {
+            expand_directories(&args.files)
+        }
     };
 
     if image_paths.is_empty() {
@@ -179,7 +195,8 @@ fn main() -> Result<()> {
 
     // Handle --ai-tag option
     if args.ai_tag {
-        let ai_config = AITaggingConfig::default();
+        let mut ai_config = AITaggingConfig::default();
+        ai_config.debug = args.debug;  // Set debug flag from command line
 
         // Only check API key if not using localhost
         if !ai_config.api_endpoint.contains("localhost") && ai_config.api_key.is_empty() {
@@ -187,7 +204,7 @@ fn main() -> Result<()> {
             eprintln!("\nTo use AI tagging, set your API key:");
             eprintln!("  export LSIX_AI_API_KEY='your-api-key-here'");
             eprintln!("\nFor local LLM (no API key required):");
-            eprintln!("  export LSIX_AI_ENDPOINT='http://localhost:8000'");
+            eprintln!("  export LSIX_AI_ENDPOINT='http://localhost:8000/v1/chat/completions'");
             eprintln!("  export LSIX_AI_MODEL='Qwen3VL-8B-Instruct-Q8_0.gguf'");
             eprintln!("\nSupported: OpenAI (GPT-4, GPT-4o), Anthropic (Claude), local LLMs");
             cleanup();
@@ -201,12 +218,27 @@ fn main() -> Result<()> {
         eprintln!("Model: {}", ai_config.model);
         eprintln!("API Endpoint: {}", ai_config.api_endpoint);
         eprintln!("Max tags per image: {}", ai_config.max_tags);
-        eprintln!("Images to process: {}\n", image_paths.len());
+        eprintln!("Images to process: {}", image_paths.len());
 
-        eprintln!("This may take a moment... (cached images will be faster)\n");
+        if ai_config.custom_prompt.is_some() {
+            eprintln!("Prompt: Custom (from ~/.lsix/tag_prompt.md)");
+        } else {
+            eprintln!("Prompt: Default (create ~/.lsix/tag_prompt.md to customize)");
+        }
+        eprintln!();
+
+        if ai_config.api_endpoint.contains("localhost") {
+            eprintln!("💡 Using local LLM - first run will be slower, subsequent runs use cache\n");
+        } else {
+            eprintln!("💡 Tip: Run once to cache tags, then filtering is instant!\n");
+        }
+
+        if args.force {
+            eprintln!("⚠️  Force mode enabled - ignoring cache and regenerating all tags\n");
+        }
 
         // Tag all images with AI
-        let ai_tags_map = tag_images_parallel(&image_paths, &ai_config)
+        let ai_tags_map = tag_images_parallel(&image_paths, &ai_config, args.force)
             .context("AI tagging failed")?;
 
         eprintln!("\n✓ AI tagging complete!");
@@ -215,7 +247,7 @@ fn main() -> Result<()> {
 
         // Display all generated tags
         eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
-        eprintln!("║                    Generated Tags                                            ║");
+        eprintln!("║                    Generated Tags Preview                                   ║");
         eprintln!("╚════════════════════════════════════════════════════════════════════════════╝\n");
 
         for (path, tags) in ai_tags_map.iter() {
