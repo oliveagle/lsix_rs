@@ -3,6 +3,9 @@ use rayon::prelude::*;
 use std::process::{Command, Stdio};
 use std::io::{self, Write};
 use std::sync::OnceLock;
+use std::fs;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 // Import filename types
 use crate::filename::FilenameMode;
@@ -209,9 +212,137 @@ pub fn process_images_concurrent(
     Ok(())
 }
 
+/// Generate cache key based on images and config
+fn generate_cache_key(images: &[ImageEntry], config: &ImageConfig) -> String {
+    let mut hasher = DefaultHasher::new();
+
+    // Hash configuration parameters
+    config.tile_width.hash(&mut hasher);
+    config.tile_height.hash(&mut hasher);
+    config.num_colors.hash(&mut hasher);
+    config.background.hash(&mut hasher);
+    config.foreground.hash(&mut hasher);
+    config.shadow.hash(&mut hasher);
+
+    // Hash image paths and modification times
+    for img in images {
+        img.path.hash(&mut hasher);
+        // Include file modification time in hash
+        if let Ok(metadata) = fs::metadata(&img.path) {
+            if let Ok(modified) = metadata.modified() {
+                modified.duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .hash(&mut hasher);
+            }
+        }
+    }
+
+    format!("{:x}", hasher.finish())
+}
+
+/// Get cache directory path
+fn get_cache_dir() -> Result<std::path::PathBuf> {
+    let cache_dir = if let Ok(home) = std::env::var("HOME") {
+        std::path::PathBuf::from(home).join(".cache").join("lsix")
+    } else {
+        std::path::PathBuf::from("/tmp/lsix")
+    };
+
+    // Create cache directory if it doesn't exist
+    if !cache_dir.exists() {
+        fs::create_dir_all(&cache_dir)?;
+    }
+
+    Ok(cache_dir)
+}
+
+/// Check if cached data is valid for the given images
+fn is_cache_valid(cache_path: &std::path::Path, images: &[ImageEntry]) -> bool {
+    if !cache_path.exists() {
+        return false;
+    }
+
+    // Check if all source images still exist and haven't been modified
+    for img in images {
+        if let Ok(metadata) = fs::metadata(&img.path) {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(cache_metadata) = fs::metadata(cache_path) {
+                    if let Ok(cache_modified) = cache_metadata.modified() {
+                        // Cache should be newer than source images
+                        if modified > cache_modified {
+                            return false;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Source image doesn't exist
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Read from cache
+fn read_from_cache(cache_path: &std::path::Path) -> Result<bool> {
+    match fs::read(cache_path) {
+        Ok(data) => {
+            io::stdout().write_all(&data)?;
+            io::stdout().flush()?;
+            Ok(true)
+        }
+        Err(_) => Ok(false),
+    }
+}
+
+/// Write to cache
+fn write_to_cache(cache_path: &std::path::Path, data: &[u8]) -> Result<()> {
+    fs::write(cache_path, data)?;
+    Ok(())
+}
+
 /// Process a chunk of images (one row) using streaming output
 /// This matches the original script behavior: render each row immediately
+/// Uses caching to avoid reprocessing on subsequent runs
 fn process_chunk(images: &[ImageEntry], config: &ImageConfig) -> Result<()> {
+    // Try to use cache
+    if let Ok(cache_dir) = get_cache_dir() {
+        let cache_key = generate_cache_key(images, config);
+        let cache_path = cache_dir.join(&cache_key);
+
+        // Check if cache is valid
+        if is_cache_valid(&cache_path, images) {
+            // Try to read from cache
+            if let Ok(true) = read_from_cache(&cache_path) {
+                return Ok(());
+            }
+        }
+
+        // Cache miss or invalid, generate new output
+        let sixel_output = generate_sixel_output(images, config)?;
+
+        // Write to cache for next time
+        let _ = write_to_cache(&cache_path, &sixel_output);
+
+        // Output to terminal
+        io::stdout().write_all(&sixel_output)?;
+        io::stdout().flush()?;
+
+        return Ok(());
+    }
+
+    // Fallback: generate output without caching
+    let sixel_output = generate_sixel_output(images, config)?;
+    io::stdout().write_all(&sixel_output)?;
+    io::stdout().flush()?;
+
+    Ok(())
+}
+
+/// Generate SIXEL output for a chunk of images
+fn generate_sixel_output(images: &[ImageEntry], config: &ImageConfig) -> Result<Vec<u8>> {
     // Build montage arguments for this row
     let mut montage_args = config.get_montage_options();
 
@@ -241,7 +372,7 @@ fn process_chunk(images: &[ImageEntry], config: &ImageConfig) -> Result<()> {
         .arg(format!("{}", config.num_colors))
         .arg("sixel:-")
         .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
         .context("Failed to execute convert command")?;
@@ -254,6 +385,15 @@ fn process_chunk(images: &[ImageEntry], config: &ImageConfig) -> Result<()> {
         }
     }
 
+    // Read output from convert
+    let sixel_data = if let Some(mut convert_stdout) = convert_child.stdout.take() {
+        let mut buffer = Vec::new();
+        std::io::copy(&mut convert_stdout, &mut buffer)?;
+        buffer
+    } else {
+        Vec::new()
+    };
+
     // Wait for both processes to complete
     let montage_status = montage_child.wait()?;
     if !montage_status.success() {
@@ -265,7 +405,7 @@ fn process_chunk(images: &[ImageEntry], config: &ImageConfig) -> Result<()> {
         anyhow::bail!("Convert command failed with exit code: {:?}", convert_status.code());
     }
 
-    Ok(())
+    Ok(sixel_data)
 }
 
 /// Pre-load and validate image files concurrently
