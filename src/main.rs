@@ -7,7 +7,7 @@ use clap::Parser;
 use image_proc::{expand_directories, validate_images_concurrent, process_images_concurrent, ImageConfig};
 use filename::FilenameMode;
 use std::process::Command;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 
 /// lsix: like ls, but for images.
 /// Shows thumbnails of images with titles directly in terminal.
