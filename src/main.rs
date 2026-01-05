@@ -78,6 +78,20 @@ struct Args {
     /// Similarity threshold for grouping (0.0 to 1.0, default: 0.85)
     #[arg(long, default_value = "0.85")]
     similarity_threshold: f32,
+
+    // Tag management
+    /// List all tags with image counts (does not display images)
+    #[arg(long)]
+    list_tags: bool,
+
+    /// Sort tags by: count, name (default: count)
+    #[arg(long, default_value = "count")]
+    #[arg(value_parser = clap::builder::PossibleValuesParser::new(["count", "name"]))]
+    sort_tags_by: String,
+
+    /// Filter by specific tag (can be used multiple times)
+    #[arg(long)]
+    tag: Vec<String>,
 }
 
 /// Cleanup handler to stop SIXEL and reset terminal
@@ -148,6 +162,40 @@ fn main() -> Result<()> {
 
     if images.is_empty() {
         eprintln!("No valid images to display.");
+        cleanup();
+        return Ok(());
+    }
+
+    // Handle --list-tags option
+    if args.list_tags {
+        use grouping::list_tag_statistics;
+        let image_paths: Vec<String> = images.iter().map(|img| img.path.clone()).collect();
+
+        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
+        eprintln!("║                        Tag Statistics                                       ║");
+        eprintln!("╚════════════════════════════════════════════════════════════════════════════╝\n");
+
+        list_tag_statistics(&image_paths, &args.sort_tags_by)?;
+
+        eprintln!("\n💡 Tips:");
+        eprintln!("  --tag <TAG>              Show only images with specific tag");
+        eprintln!("  --group-by tags          Group images by tag (one group at a time)");
+        eprintln!("  --tag <TAG> --tag <TAG> Show images with multiple tags (any match)\n");
+
+        cleanup();
+        return Ok(());
+    }
+
+    // Filter by specific tags if --tag is provided
+    let images = if !args.tag.is_empty() {
+        use grouping::filter_by_tags;
+        filter_by_tags(images, &args.tag)?
+    } else {
+        images
+    };
+
+    if images.is_empty() {
+        eprintln!("No images match the specified tag filters.");
         cleanup();
         return Ok(());
     }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 use crate::filter::ImageFeatures;
+use crate::image_proc::ImageEntry;
 
 /// Group ID type
 pub type GroupId = String;
@@ -549,6 +550,125 @@ fn get_dominant_color_name(_images: &[String]) -> String {
     // Simplified - just return a color category
     // Real implementation would analyze actual colors
     "Color".to_string()
+}
+
+/// List all tags with their image counts
+pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> {
+    use std::collections::HashMap;
+    use std::io::Write;
+
+    // Collect all tags and their counts
+    let mut tag_counts: HashMap<String, usize> = HashMap::new();
+    let mut tag_files: HashMap<String, Vec<String>> = HashMap::new();
+
+    for path in image_paths {
+        let tags = extract_tags(path);
+        for tag in tags {
+            *tag_counts.entry(tag.clone()).or_insert(0) += 1;
+            tag_files.entry(tag).or_insert_with(Vec::new).push(path.clone());
+        }
+    }
+
+    if tag_counts.is_empty() {
+        eprintln!("No tags found in image filenames/paths.");
+        eprintln!("💡 Tip: Rename your files with descriptive names (e.g., vacation_beach_001.jpg)");
+        return Ok(());
+    }
+
+    // Sort tags
+    let mut tags_vec: Vec<(String, usize)> = tag_counts.into_iter().collect();
+    match sort_by {
+        "name" => tags_vec.sort_by(|a, b| a.0.cmp(&b.0)),
+        _ => tags_vec.sort_by(|a, b| b.1.cmp(&a.1)),  // Default: sort by count
+    }
+
+    // Find longest tag name for alignment
+    let max_tag_len = tags_vec.iter()
+        .map(|(tag, _)| tag.len())
+        .max()
+        .unwrap_or(10);
+
+    // Calculate total images
+    let total_images = image_paths.len();
+
+    // Display statistics
+    eprintln!("Total images: {}\n", total_images);
+    eprintln!("Tags found: {}\n", tags_vec.len());
+
+    eprintln!("{:<width$} {:>10}  {:>10}  {}", "Tag", "Count", "Percentage", "Example Files",
+             width = max_tag_len);
+    eprintln!("{:-<width$} {:>10}  {:>10}  {}", "─", "─", "─", "─",
+             width = max_tag_len);
+
+    for (tag, count) in &tags_vec {
+        let percentage = (*count as f32 / total_images as f32) * 100.0;
+
+        // Show first few example files
+        let examples = tag_files.get(tag)
+            .map(|files| {
+                files.iter()
+                    .take(2)
+                    .map(|f| {
+                        // Extract just filename
+                        Path::new(f)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("?")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+
+        eprintln!("{:<width$} {:>10}  {:>9.1}%  {}",
+                 tag,
+                 count,
+                 percentage,
+                 if examples.len() > 50 { &examples[..50] } else { &examples },
+                 width = max_tag_len);
+    }
+
+    // Show summary
+    let avg_images_per_tag = total_images as f32 / tags_vec.len() as f32;
+    eprintln!("\nSummary:");
+    eprintln!("  Average images per tag: {:.1}", avg_images_per_tag);
+    eprintln!("  Most common tag: \"{}\" ({} images)",
+             tags_vec.first().map(|(t, _)| t.as_str()).unwrap_or("none"),
+             tags_vec.first().map(|(_, c)| *c).unwrap_or(0));
+
+    Ok(())
+}
+
+/// Filter images by specific tags (OR logic - match any tag)
+pub fn filter_by_tags(images: Vec<ImageEntry>, tags: &[String]) -> Result<Vec<ImageEntry>> {
+    if tags.is_empty() {
+        return Ok(images);
+    }
+
+    // Collect all valid image paths that have matching tags
+    let filtered_paths: Vec<String> = images.iter()
+        .filter(|img| {
+            let image_tags = extract_tags(&img.path);
+            // Check if any of the requested tags match
+            tags.iter().any(|requested_tag| {
+                image_tags.iter().any(|img_tag| {
+                    img_tag.to_lowercase() == requested_tag.to_lowercase()
+                })
+            })
+        })
+        .map(|img| img.path.clone())
+        .collect();
+
+    // Now filter the original images
+    let filtered: Vec<ImageEntry> = images.into_iter()
+        .filter(|img| filtered_paths.contains(&img.path))
+        .collect();
+
+    eprintln!("Filtered to {} images by tags: {}",
+             filtered.len(),
+             tags.join(", "));
+
+    Ok(filtered)
 }
 
 #[cfg(test)]
