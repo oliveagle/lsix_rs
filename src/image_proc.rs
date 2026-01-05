@@ -98,18 +98,35 @@ impl ImageConfig {
         // Font size is based on width of each tile
         let font_size = (tile_width / 10).max(10);
 
+        // Optimize color count for performance
+        // Use fewer colors for faster processing
+        let optimized_colors = if let Ok(colors_str) = std::env::var("LSIX_COLORS") {
+            colors_str.parse().unwrap_or(num_colors)
+        } else {
+            // Default to 128 colors for better performance (vs 256)
+            num_colors.min(128)
+        };
+
+        // Disable shadow by default for better performance
+        let shadow = if let Ok(shadow_str) = std::env::var("LSIX_SHADOW") {
+            shadow_str != "0"
+        } else {
+            // No shadow by default - much faster
+            false
+        };
+
         Self {
             tile_width,
             tile_height,
             tile_xspace,
             tile_yspace,
             num_tiles_per_row,
-            num_colors,
+            num_colors: optimized_colors,
             background: bg.to_string(),
             foreground: fg.to_string(),
             font_family: None,
             font_size,
-            shadow: num_colors > 16,
+            shadow,
         }
     }
 
@@ -194,22 +211,60 @@ pub struct ImageEntry {
 }
 
 /// Process and display images in chunks, with concurrent loading
+/// Processes multiple rows in parallel for better performance
 pub fn process_images_concurrent(
     images: Vec<ImageEntry>,
     config: &ImageConfig,
 ) -> Result<()> {
+    use rayon::prelude::*;
+
     // Process images in chunks (rows)
     let chunk_size = config.num_tiles_per_row as usize;
+    let chunks: Vec<_> = images.chunks(chunk_size).collect();
 
-    for chunk in images.chunks(chunk_size) {
-        // Process the chunk (one row of images)
-        process_chunk(chunk, config)?;
-        // Flush output to ensure immediate display
+    // Process rows in parallel, but maintain order for display
+    let results: Vec<Result<Vec<u8>>> = chunks
+        .par_iter()  // Parallel iteration over rows
+        .map(|chunk| generate_sixel_output_cached(chunk, config))
+        .collect();
+
+    // Output in order
+    for result in results {
+        let data = result?;
+        io::stdout().write_all(&data)?;
         io::stdout().flush()?;
-        io::stderr().flush()?;
     }
 
     Ok(())
+}
+
+/// Generate SIXEL output with caching support
+fn generate_sixel_output_cached(images: &[ImageEntry], config: &ImageConfig) -> Result<Vec<u8>> {
+    // Try to use cache
+    if let Ok(cache_dir) = get_cache_dir() {
+        let cache_key = generate_cache_key(images, config);
+        let cache_path = cache_dir.join(&cache_key);
+
+        // Check if cache is valid
+        if is_cache_valid(&cache_path, images) {
+            // Try to read from cache
+            match fs::read(&cache_path) {
+                Ok(data) => return Ok(data),
+                Err(_) => {},
+            }
+        }
+
+        // Cache miss or invalid, generate new output
+        let sixel_output = generate_sixel_output(images, config)?;
+
+        // Write to cache for next time
+        let _ = write_to_cache(&cache_path, &sixel_output);
+
+        return Ok(sixel_output);
+    }
+
+    // Fallback: generate output without caching
+    generate_sixel_output(images, config)
 }
 
 /// Generate cache key based on images and config
@@ -285,59 +340,9 @@ fn is_cache_valid(cache_path: &std::path::Path, images: &[ImageEntry]) -> bool {
     true
 }
 
-/// Read from cache
-fn read_from_cache(cache_path: &std::path::Path) -> Result<bool> {
-    match fs::read(cache_path) {
-        Ok(data) => {
-            io::stdout().write_all(&data)?;
-            io::stdout().flush()?;
-            Ok(true)
-        }
-        Err(_) => Ok(false),
-    }
-}
-
 /// Write to cache
 fn write_to_cache(cache_path: &std::path::Path, data: &[u8]) -> Result<()> {
     fs::write(cache_path, data)?;
-    Ok(())
-}
-
-/// Process a chunk of images (one row) using streaming output
-/// This matches the original script behavior: render each row immediately
-/// Uses caching to avoid reprocessing on subsequent runs
-fn process_chunk(images: &[ImageEntry], config: &ImageConfig) -> Result<()> {
-    // Try to use cache
-    if let Ok(cache_dir) = get_cache_dir() {
-        let cache_key = generate_cache_key(images, config);
-        let cache_path = cache_dir.join(&cache_key);
-
-        // Check if cache is valid
-        if is_cache_valid(&cache_path, images) {
-            // Try to read from cache
-            if let Ok(true) = read_from_cache(&cache_path) {
-                return Ok(());
-            }
-        }
-
-        // Cache miss or invalid, generate new output
-        let sixel_output = generate_sixel_output(images, config)?;
-
-        // Write to cache for next time
-        let _ = write_to_cache(&cache_path, &sixel_output);
-
-        // Output to terminal
-        io::stdout().write_all(&sixel_output)?;
-        io::stdout().flush()?;
-
-        return Ok(());
-    }
-
-    // Fallback: generate output without caching
-    let sixel_output = generate_sixel_output(images, config)?;
-    io::stdout().write_all(&sixel_output)?;
-    io::stdout().flush()?;
-
     Ok(())
 }
 
@@ -346,15 +351,41 @@ fn generate_sixel_output(images: &[ImageEntry], config: &ImageConfig) -> Result<
     // Build montage arguments for this row
     let mut montage_args = config.get_montage_options();
 
+    // Track valid images
+    let mut valid_images = Vec::new();
+
     // Add labels and file paths for each image
     for img in images {
+        if img.path.is_empty() {
+            eprintln!("Warning: Skipping image with empty path");
+            continue;
+        }
+
+        // Check if file exists
+        if !std::path::Path::new(&img.path).exists() {
+            eprintln!("Warning: File not found: {}", img.path);
+            continue;
+        }
+
+        valid_images.push(img);
         montage_args.push("-label".to_string());
         montage_args.push(img.label.clone());
         montage_args.push(img.path.clone());
     }
 
+    // If no valid images, return empty output
+    if valid_images.is_empty() {
+        eprintln!("Warning: No valid images in this chunk");
+        return Ok(Vec::new());
+    }
+
     // Output to stdout in GIF format (for piping)
     montage_args.push("gif:-".to_string());
+
+    // Debug: print arguments if LSIX_DEBUG is set
+    if std::env::var("LSIX_DEBUG").is_ok() {
+        eprintln!("Montage args: {:?}", montage_args);
+    }
 
     // Start montage process
     let mut montage_cmd = config.get_montage_command();
@@ -437,7 +468,15 @@ pub fn validate_images_concurrent(paths: &[String], explicit: bool, mode: Filena
 }
 
 /// Find and process directories recursively
+/// Filters to only include image files
 pub fn expand_directories(paths: &[String]) -> Vec<String> {
+    // Supported image extensions
+    let image_extensions = [
+        "jpg", "jpeg", "png", "gif", "webp", "tiff", "tif",
+        "pnm", "ppm", "pgm", "pbm", "pam", "xbm", "xpm", "bmp",
+        "ico", "svg", "eps",
+    ];
+
     let mut result = Vec::new();
 
     for path in paths {
@@ -450,13 +489,24 @@ pub fn expand_directories(paths: &[String]) -> Vec<String> {
             if let Ok(entries) = std::fs::read_dir(path) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     if let Some(path_str) = entry.path().to_str() {
-                        result.push(path_str.to_string());
+                        // Only add if it's a file with image extension
+                        if entry.path().is_file() {
+                            if let Some(ext) = entry.path().extension() {
+                                if image_extensions.contains(&ext.to_string_lossy().as_ref()) {
+                                    result.push(path_str.to_string());
+                                }
+                            }
+                        }
                     }
                 }
             }
         } else {
-            // Regular file, keep as is
-            result.push(path.clone());
+            // Regular file - check if it has image extension
+            if let Some(ext) = path_obj.extension() {
+                if image_extensions.contains(&ext.to_string_lossy().as_ref()) {
+                    result.push(path.clone());
+                }
+            }
         }
     }
 
