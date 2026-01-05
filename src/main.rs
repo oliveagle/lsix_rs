@@ -1,11 +1,13 @@
 mod filename;
 mod image_proc;
 mod terminal;
+mod filter;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use image_proc::{expand_directories, validate_images_concurrent, process_images_concurrent, ImageConfig};
 use filename::FilenameMode;
+use filter::{FilterConfig, parse_orientation, parse_file_size};
 use std::process::Command;
 use std::io::{self, Write};
 
@@ -25,6 +27,45 @@ struct Args {
     #[arg(short, long, default_value = "short")]
     #[arg(value_parser = clap::builder::PossibleValuesParser::new(["short", "long"]))]
     mode: String,
+
+    // Size filters
+    /// Minimum image width in pixels
+    #[arg(long)]
+    min_width: Option<u32>,
+
+    /// Maximum image width in pixels
+    #[arg(long)]
+    max_width: Option<u32>,
+
+    /// Minimum image height in pixels
+    #[arg(long)]
+    min_height: Option<u32>,
+
+    /// Maximum image height in pixels
+    #[arg(long)]
+    max_height: Option<u32>,
+
+    /// Minimum file size (e.g., 100K, 1M, 1G)
+    #[arg(long)]
+    min_file_size: Option<String>,
+
+    /// Maximum file size (e.g., 100K, 1M, 1G)
+    #[arg(long)]
+    max_file_size: Option<String>,
+
+    // Color filters
+    /// Minimum brightness (0.0 to 1.0)
+    #[arg(long)]
+    min_brightness: Option<f32>,
+
+    /// Maximum brightness (0.0 to 1.0)
+    #[arg(long)]
+    max_brightness: Option<f32>,
+
+    // Orientation filter
+    /// Filter by orientation: landscape, portrait, or square
+    #[arg(long)]
+    orientation: Option<String>,
 }
 
 /// Cleanup handler to stop SIXEL and reset terminal
@@ -57,6 +98,19 @@ fn main() -> Result<()> {
         _ => FilenameMode::Short,
     };
 
+    // Build filter config from command line arguments
+    let filter_config = FilterConfig {
+        min_width: args.min_width,
+        max_width: args.max_width,
+        min_height: args.min_height,
+        max_height: args.max_height,
+        min_file_size: args.min_file_size.and_then(|s| parse_file_size(&s).ok()),
+        max_file_size: args.max_file_size.and_then(|s| parse_file_size(&s).ok()),
+        min_brightness: args.min_brightness,
+        max_brightness: args.max_brightness,
+        orientation: args.orientation.and_then(|s| parse_orientation(&s).ok()),
+    };
+
     // Auto-detect terminal capabilities (very fast now)
     let term_config = terminal::autodetect()
         .context("Terminal auto-detection failed")?;
@@ -77,8 +131,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Validate and process images concurrently
-    let images = validate_images_concurrent(&image_paths, !args.files.is_empty(), filename_mode);
+    // Validate and process images concurrently with filtering
+    let images = validate_images_concurrent(&image_paths, !args.files.is_empty(), filename_mode, &filter_config);
 
     if images.is_empty() {
         eprintln!("No valid images to display.");

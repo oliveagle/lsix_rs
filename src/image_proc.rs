@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 
 // Import filename types
 use crate::filename::FilenameMode;
+use crate::filter::{FilterConfig, analyze_image};
 
 /// ImageMagick command detection result
 static IMAGEMAGICK_MODE: OnceLock<ImageMagickMode> = OnceLock::new();
@@ -440,9 +441,20 @@ fn generate_sixel_output(images: &[ImageEntry], config: &ImageConfig) -> Result<
 }
 
 /// Pre-load and validate image files concurrently
-/// Returns only valid image entries
-pub fn validate_images_concurrent(paths: &[String], explicit: bool, mode: FilenameMode) -> Vec<ImageEntry> {
+/// Returns only valid image entries that match the filter criteria
+pub fn validate_images_concurrent(paths: &[String], explicit: bool, mode: FilenameMode, filter_config: &FilterConfig) -> Vec<ImageEntry> {
     use crate::filename::{process_image_path, process_label_with_mode};
+
+    // Check if any filter is active
+    let has_filters = filter_config.min_width.is_some()
+        || filter_config.max_width.is_some()
+        || filter_config.min_height.is_some()
+        || filter_config.max_height.is_some()
+        || filter_config.min_file_size.is_some()
+        || filter_config.max_file_size.is_some()
+        || filter_config.min_brightness.is_some()
+        || filter_config.max_brightness.is_some()
+        || filter_config.orientation.is_some();
 
     paths
         .par_iter() // Parallel iteration
@@ -457,6 +469,22 @@ pub fn validate_images_concurrent(paths: &[String], explicit: bool, mode: Filena
 
             // Process the path (add [0] for animated formats if needed)
             let processed_path = process_image_path(path, explicit);
+
+            // If filters are active, analyze and check
+            if has_filters {
+                match analyze_image(&processed_path) {
+                    Ok(features) => {
+                        if !filter_config.matches(&features) {
+                            // Image doesn't match filter, skip it
+                            return None;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to analyze {}: {}", path, e);
+                        // Include image anyway if analysis fails
+                    }
+                }
+            }
 
             // Create image entry
             Some(ImageEntry {
