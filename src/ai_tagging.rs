@@ -19,13 +19,32 @@ pub struct AITaggingConfig {
 
 impl Default for AITaggingConfig {
     fn default() -> Self {
+        let api_key = std::env::var("LSIX_AI_API_KEY")
+            .unwrap_or_default();
+
+        // Detect if using local LLM (localhost or no API key)
+        let is_local = std::env::var("LSIX_AI_ENDPOINT")
+            .unwrap_or_default()
+            .contains("localhost") || api_key.is_empty();
+
         Self {
             api_endpoint: std::env::var("LSIX_AI_ENDPOINT")
-                .unwrap_or_else(|_| "https://api.openai.com/v1/chat/completions".to_string()),
-            api_key: std::env::var("LSIX_AI_API_KEY")
-                .unwrap_or_default(),
+                .unwrap_or_else(|_| {
+                    if is_local {
+                        "http://localhost:8000".to_string()
+                    } else {
+                        "https://api.openai.com/v1/chat/completions".to_string()
+                    }
+                }),
+            api_key,
             model: std::env::var("LSIX_AI_MODEL")
-                .unwrap_or_else(|_| "gpt-4o-mini".to_string()),  // Cost-effective
+                .unwrap_or_else(|_| {
+                    if is_local {
+                        "Qwen3VL-8B-Instruct-Q8_0.gguf".to_string()
+                    } else {
+                        "gpt-4o-mini".to_string()
+                    }
+                }),
             max_tags: 10,
             confidence_threshold: 0.5,
             cache_dir: Some(
@@ -117,13 +136,19 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig) -> Result<AITags
 
     // Call API
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(60))  // Longer timeout for local LLM
         .build()?;
 
-    let response = client
+    let mut request_builder = client
         .post(&config.api_endpoint)
-        .header("Authorization", format!("Bearer {}", config.api_key))
-        .header("Content-Type", "application/json")
+        .header("Content-Type", "application/json");
+
+    // Only add Authorization header if we have an API key
+    if !config.api_key.is_empty() {
+        request_builder = request_builder.header("Authorization", format!("Bearer {}", config.api_key));
+    }
+
+    let response = request_builder
         .json(&request_body)
         .send()
         .context("Failed to call AI API")?;

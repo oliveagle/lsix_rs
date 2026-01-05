@@ -181,14 +181,15 @@ fn main() -> Result<()> {
     if args.ai_tag {
         let ai_config = AITaggingConfig::default();
 
-        if ai_config.api_key.is_empty() {
+        // Only check API key if not using localhost
+        if !ai_config.api_endpoint.contains("localhost") && ai_config.api_key.is_empty() {
             eprintln!("Error: LSIX_AI_API_KEY environment variable not set!");
             eprintln!("\nTo use AI tagging, set your API key:");
             eprintln!("  export LSIX_AI_API_KEY='your-api-key-here'");
-            eprintln!("\nOptional configuration:");
-            eprintln!("  export LSIX_AI_ENDPOINT='https://api.openai.com/v1/chat/completions'");
-            eprintln!("  export LSIX_AI_MODEL='gpt-4o-mini'");
-            eprintln!("\nSupported: OpenAI (GPT-4, GPT-4o), Anthropic (Claude), or compatible APIs");
+            eprintln!("\nFor local LLM (no API key required):");
+            eprintln!("  export LSIX_AI_ENDPOINT='http://localhost:8000'");
+            eprintln!("  export LSIX_AI_MODEL='Qwen3VL-8B-Instruct-Q8_0.gguf'");
+            eprintln!("\nSupported: OpenAI (GPT-4, GPT-4o), Anthropic (Claude), local LLMs");
             cleanup();
             return Ok(());
         }
