@@ -10,6 +10,7 @@ use std::hash::{Hash, Hasher};
 // Import filename types
 use crate::filename::FilenameMode;
 use crate::filter::{FilterConfig, analyze_image};
+use crate::grouping::ImageGroup;
 
 /// ImageMagick command detection result
 static IMAGEMAGICK_MODE: OnceLock<ImageMagickMode> = OnceLock::new();
@@ -234,6 +235,56 @@ pub fn process_images_concurrent(
         let data = result?;
         io::stdout().write_all(&data)?;
         io::stdout().flush()?;
+    }
+
+    Ok(())
+}
+
+/// Process and display images grouped by criteria
+/// Shows group headers and processes each group separately
+pub fn process_images_grouped(
+    groups: Vec<ImageGroup>,
+    all_images: Vec<ImageEntry>,
+    config: &ImageConfig,
+) -> Result<()> {
+    use std::io::Write;
+
+    for (group_idx, group) in groups.iter().enumerate() {
+        // Print group header
+        eprintln!("\n╔═══════════════════════════════════════════════════════════════");
+        eprintln!("║ Group {}: {} ({} images)", group_idx + 1, group.name, group.images.len());
+
+        // Show group metadata
+        if !group.metadata.common_features.is_empty() {
+            let features: Vec<String> = group.metadata.common_features
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, v))
+                .collect();
+            eprintln!("║ {}", features.join(", "));
+        }
+
+        eprintln!("╚═══════════════════════════════════════════════════════════════");
+        io::stderr().flush()?;
+
+        // Find ImageEntry objects for images in this group
+        let group_images: Vec<ImageEntry> = all_images
+            .iter()
+            .filter(|img| group.images.contains(&img.path))
+            .cloned()
+            .collect();
+
+        if group_images.is_empty() {
+            eprintln!("(No images in this group)");
+            continue;
+        }
+
+        // Process images in this group
+        process_images_concurrent(group_images, config)?;
+
+        // Add separator between groups
+        if group_idx < groups.len() - 1 {
+            eprintln!("\n");  // Extra newline between groups
+        }
     }
 
     Ok(())

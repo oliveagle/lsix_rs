@@ -2,12 +2,14 @@ mod filename;
 mod image_proc;
 mod terminal;
 mod filter;
+mod grouping;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use image_proc::{expand_directories, validate_images_concurrent, process_images_concurrent, ImageConfig};
+use image_proc::{expand_directories, validate_images_concurrent, process_images_concurrent, process_images_grouped, ImageConfig};
 use filename::FilenameMode;
 use filter::{FilterConfig, parse_orientation, parse_file_size};
+use grouping::{GroupBy, group_images};
 use std::process::Command;
 use std::io::{self, Write};
 
@@ -66,6 +68,16 @@ struct Args {
     /// Filter by orientation: landscape, portrait, or square
     #[arg(long)]
     orientation: Option<String>,
+
+    // Grouping options
+    /// Group images by: similarity, color, size, time, tags, none
+    #[arg(long, default_value = "none")]
+    #[arg(value_parser = clap::builder::PossibleValuesParser::new(["none", "similarity", "color", "size", "time", "tags"]))]
+    group_by: String,
+
+    /// Similarity threshold for grouping (0.0 to 1.0, default: 0.85)
+    #[arg(long, default_value = "0.85")]
+    similarity_threshold: f32,
 }
 
 /// Cleanup handler to stop SIXEL and reset terminal
@@ -140,6 +152,16 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Determine grouping strategy
+    let group_strategy = match args.group_by.as_str() {
+        "similarity" => GroupBy::Similarity,
+        "color" => GroupBy::Color,
+        "size" => GroupBy::Size,
+        "time" => GroupBy::Time,
+        "tags" => GroupBy::Tags,
+        _ => GroupBy::None,
+    };
+
     // Create image configuration
     let img_config = ImageConfig::from_terminal_width(
         term_config.width,
@@ -148,8 +170,32 @@ fn main() -> Result<()> {
         &term_config.foreground,
     );
 
-    // Process and display images
-    process_images_concurrent(images, &img_config)?;
+    // Process and display images (with or without grouping)
+    if group_strategy != GroupBy::None {
+        // Extract image paths
+        let image_paths: Vec<String> = images.iter().map(|img| img.path.clone()).collect();
+
+        eprintln!("Grouping images by {:?}...", args.group_by);
+        eprintln!("This may take a moment for analysis...");
+
+        // Group images
+        let groups = group_images(&image_paths, group_strategy, args.similarity_threshold)
+            .context("Image grouping failed")?;
+
+        if groups.is_empty() {
+            eprintln!("No groups found.");
+            cleanup();
+            return Ok(());
+        }
+
+        eprintln!("Found {} group(s)", groups.len());
+
+        // Display grouped images
+        process_images_grouped(groups, images, &img_config)?;
+    } else {
+        // Process and display images without grouping
+        process_images_concurrent(images, &img_config)?;
+    }
 
     // Skip the waiting part - just cleanup and exit
     // The original script waits for terminal response, but it's not strictly necessary
