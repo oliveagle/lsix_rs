@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilenameMode {
-    Short,  // Only basename (default)
-    Long,   // Full path with processing
+    Short, // Only basename (default)
+    Long,  // Full path with processing
 }
 
 /// Process a filename for display in ImageMagick labels
@@ -61,7 +61,11 @@ fn halve_string(s: &str, span: usize) -> String {
     let left = &s[..mid];
     let right = &s[mid..];
 
-    format!("{}\n{}", halve_string(left, span), halve_string(right, span))
+    format!(
+        "{}\n{}",
+        halve_string(left, span),
+        halve_string(right, span)
+    )
 }
 
 /// Process image paths to handle animated GIFs and other multi-frame formats
@@ -80,9 +84,8 @@ pub fn process_image_path(path: &str, explicit: bool) -> String {
 /// Returns a sorted list of image file paths
 pub fn find_image_files() -> Vec<String> {
     let extensions = [
-        "jpg", "jpeg", "png", "gif", "webp", "tiff", "tif",
-        "pnm", "ppm", "pgm", "pbm", "pam", "xbm", "xpm", "bmp",
-        "ico", "svg", "eps",
+        "jpg", "jpeg", "png", "gif", "webp", "tiff", "tif", "pnm", "ppm", "pgm", "pbm", "pam",
+        "xbm", "xpm", "bmp", "ico", "svg", "eps",
     ];
 
     let mut files = Vec::new();
@@ -134,7 +137,10 @@ mod tests {
     fn test_halve_string() {
         assert_eq!(halve_string("short", 10), "short");
         // 16 chars, span=5 -> splits into 4,4,4,4
-        assert_eq!(halve_string("verylongfilename", 5), "very\nlong\nfile\nname");
+        assert_eq!(
+            halve_string("verylongfilename", 5),
+            "very\nlong\nfile\nname"
+        );
     }
 
     #[test]

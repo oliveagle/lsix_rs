@@ -1,10 +1,10 @@
-use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::path::Path;
-use serde::{Deserialize, Serialize};
+use crate::ai_tagging::{AITaggingConfig, AITags};
 use crate::filter::ImageFeatures;
 use crate::image_proc::ImageEntry;
-use crate::ai_tagging::{AITags, AITaggingConfig};
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
 
 /// Group ID type
 pub type GroupId = String;
@@ -12,12 +12,12 @@ pub type GroupId = String;
 /// Different grouping strategies
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupBy {
-    None,           // No grouping
-    Similarity,     // By visual similarity (perceptual hash)
-    Color,          // By dominant color
-    Size,           // By dimensions (width/height)
-    Time,           // By modification time
-    Tags,           // By auto-detected tags
+    None,       // No grouping
+    Similarity, // By visual similarity (perceptual hash)
+    Color,      // By dominant color
+    Size,       // By dimensions (width/height)
+    Time,       // By modification time
+    Tags,       // By auto-detected tags
 }
 
 /// A group of similar images
@@ -26,7 +26,7 @@ pub struct ImageGroup {
     pub id: GroupId,
     pub name: String,
     pub images: Vec<String>,
-    pub representative: String,  // Most representative image
+    pub representative: String, // Most representative image
     pub metadata: GroupMetadata,
 }
 
@@ -49,7 +49,8 @@ pub struct PerceptualHash {
 impl PerceptualHash {
     /// Calculate Hamming distance between two hashes
     pub fn hamming_distance(&self, other: &PerceptualHash) -> u32 {
-        self.hash.iter()
+        self.hash
+            .iter()
             .zip(other.hash.iter())
             .map(|(&a, _b)| (a as u8).count_ones() as u32)
             .sum()
@@ -133,7 +134,9 @@ fn group_by_similarity(image_paths: &[String], threshold: f32) -> Result<Vec<Ima
     let hashes: Vec<(String, PerceptualHash)> = image_paths
         .par_iter()
         .filter_map(|path| {
-            calculate_perceptual_hash(path).ok().map(|hash| (path.clone(), hash))
+            calculate_perceptual_hash(path)
+                .ok()
+                .map(|hash| (path.clone(), hash))
         })
         .collect();
 
@@ -196,7 +199,9 @@ fn group_by_color(image_paths: &[String], threshold: f32) -> Result<Vec<ImageGro
     let histograms: Vec<(String, ColorHistogram)> = image_paths
         .par_iter()
         .filter_map(|path| {
-            calculate_color_histogram(path).ok().map(|hist| (path.clone(), hist))
+            calculate_color_histogram(path)
+                .ok()
+                .map(|hist| (path.clone(), hist))
         })
         .collect();
 
@@ -258,15 +263,13 @@ fn group_by_color(image_paths: &[String], threshold: f32) -> Result<Vec<ImageGro
 
 /// Group images by size (dimensions)
 fn group_by_size(image_paths: &[String]) -> Result<Vec<ImageGroup>> {
-    use rayon::prelude::*;
     use crate::filter::analyze_image;
+    use rayon::prelude::*;
 
     // Get image features
     let features: Vec<(String, ImageFeatures)> = image_paths
         .par_iter()
-        .filter_map(|path| {
-            analyze_image(path).ok().map(|f| (path.clone(), f))
-        })
+        .filter_map(|path| analyze_image(path).ok().map(|f| (path.clone(), f)))
         .collect();
 
     if features.is_empty() {
@@ -288,22 +291,20 @@ fn group_by_size(image_paths: &[String]) -> Result<Vec<ImageGroup>> {
     // Convert to ImageGroup structures
     Ok(size_groups
         .into_iter()
-        .map(|(size, images)| {
-            ImageGroup {
-                id: format!("size_{}", size.replace('x', "_")),
-                name: format!("{} Images", size),
-                images: images.clone(),
-                representative: images.first().cloned().unwrap_or_default(),
-                metadata: GroupMetadata {
-                    group_type: "size".to_string(),
-                    count: images.len(),
-                    common_features: {
-                        let mut features = HashMap::new();
-                        features.insert("resolution".to_string(), size);
-                        features
-                    },
+        .map(|(size, images)| ImageGroup {
+            id: format!("size_{}", size.replace('x', "_")),
+            name: format!("{} Images", size),
+            images: images.clone(),
+            representative: images.first().cloned().unwrap_or_default(),
+            metadata: GroupMetadata {
+                group_type: "size".to_string(),
+                count: images.len(),
+                common_features: {
+                    let mut features = HashMap::new();
+                    features.insert("resolution".to_string(), size);
+                    features
                 },
-            }
+            },
         })
         .collect())
 }
@@ -319,7 +320,10 @@ fn group_by_time(image_paths: &[String]) -> Result<Vec<ImageGroup>> {
             if let Ok(modified) = metadata.modified() {
                 let datetime: chrono::DateTime<chrono::Local> = modified.into();
                 let date_key = datetime.format("%Y-%m-%d").to_string();
-                time_groups.entry(date_key).or_insert_with(Vec::new).push(path.clone());
+                time_groups
+                    .entry(date_key)
+                    .or_insert_with(Vec::new)
+                    .push(path.clone());
             }
         }
     }
@@ -330,22 +334,20 @@ fn group_by_time(image_paths: &[String]) -> Result<Vec<ImageGroup>> {
 
     Ok(sorted_groups
         .into_iter()
-        .map(|(date, images)| {
-            ImageGroup {
-                id: format!("date_{}", date.replace('-', "")),
-                name: format!("{} Images", date),
-                images: images.clone(),
-                representative: images.first().cloned().unwrap_or_default(),
-                metadata: GroupMetadata {
-                    group_type: "time".to_string(),
-                    count: images.len(),
-                    common_features: {
-                        let mut features = HashMap::new();
-                        features.insert("date".to_string(), date);
-                        features
-                    },
+        .map(|(date, images)| ImageGroup {
+            id: format!("date_{}", date.replace('-', "")),
+            name: format!("{} Images", date),
+            images: images.clone(),
+            representative: images.first().cloned().unwrap_or_default(),
+            metadata: GroupMetadata {
+                group_type: "time".to_string(),
+                count: images.len(),
+                common_features: {
+                    let mut features = HashMap::new();
+                    features.insert("date".to_string(), date);
+                    features
                 },
-            }
+            },
         })
         .collect())
 }
@@ -357,28 +359,29 @@ fn group_by_tags(image_paths: &[String]) -> Result<Vec<ImageGroup>> {
     for path in image_paths {
         let tags = extract_tags(path);
         for tag in tags {
-            tag_groups.entry(tag).or_insert_with(Vec::new).push(path.clone());
+            tag_groups
+                .entry(tag)
+                .or_insert_with(Vec::new)
+                .push(path.clone());
         }
     }
 
     Ok(tag_groups
         .into_iter()
-        .map(|(tag, images)| {
-            ImageGroup {
-                id: format!("tag_{}", tag.to_lowercase().replace(' ', "_")),
-                name: format!("{} Images", tag),
-                images: images.clone(),
-                representative: images.first().cloned().unwrap_or_default(),
-                metadata: GroupMetadata {
-                    group_type: "tags".to_string(),
-                    count: images.len(),
-                    common_features: {
-                        let mut features = HashMap::new();
-                        features.insert("tag".to_string(), tag);
-                        features
-                    },
+        .map(|(tag, images)| ImageGroup {
+            id: format!("tag_{}", tag.to_lowercase().replace(' ', "_")),
+            name: format!("{} Images", tag),
+            images: images.clone(),
+            representative: images.first().cloned().unwrap_or_default(),
+            metadata: GroupMetadata {
+                group_type: "tags".to_string(),
+                count: images.len(),
+                common_features: {
+                    let mut features = HashMap::new();
+                    features.insert("tag".to_string(), tag);
+                    features
                 },
-            }
+            },
         })
         .collect())
 }
@@ -390,9 +393,12 @@ fn calculate_perceptual_hash(path: &str) -> Result<PerceptualHash> {
     // Use ImageMagick to get a small grayscale version
     let output = Command::new("convert")
         .arg(path)
-        .arg("-colorspace") .arg("Gray")
-        .arg("-resize") .arg("8x8!")
-        .arg("-format") .arg("%c")
+        .arg("-colorspace")
+        .arg("Gray")
+        .arg("-resize")
+        .arg("8x8!")
+        .arg("-format")
+        .arg("%c")
         .arg("histogram:info:-")
         .output()
         .context("Failed to calculate perceptual hash")?;
@@ -403,7 +409,8 @@ fn calculate_perceptual_hash(path: &str) -> Result<PerceptualHash> {
     // Simplified hash: just use dimensions for now
     // A real implementation would analyze pixel values
     let identify_output = Command::new("identify")
-        .arg("-format") .arg("%w %h")
+        .arg("-format")
+        .arg("%w %h")
         .arg(path)
         .output()
         .context("Failed to identify image")?;
@@ -421,7 +428,7 @@ fn calculate_perceptual_hash(path: &str) -> Result<PerceptualHash> {
         path.hash(&mut path_hash);
 
         Ok(PerceptualHash {
-            hash: vec![path_hash.finish() as u8; 8],  // 64-bit hash
+            hash: vec![path_hash.finish() as u8; 8], // 64-bit hash
             width,
             height,
         })
@@ -436,8 +443,10 @@ fn calculate_color_histogram(path: &str) -> Result<ColorHistogram> {
 
     let output = Command::new("convert")
         .arg(path)
-        .arg("-resize") .arg("100x100!")  // Downsample for speed
-        .arg("-format") .arg("%c")
+        .arg("-resize")
+        .arg("100x100!") // Downsample for speed
+        .arg("-format")
+        .arg("%c")
         .arg("histogram:info:-")
         .output()
         .context("Failed to calculate color histogram")?;
@@ -529,8 +538,8 @@ fn is_meaningful_tag(tag: &str) -> bool {
 
     // Filter out common patterns
     let ignore_patterns = [
-        "img", "photo", "pic", "image", "dsc", "sam",
-        "001", "002", "003", "final", "copy", "version",
+        "img", "photo", "pic", "image", "dsc", "sam", "001", "002", "003", "final", "copy",
+        "version",
     ];
 
     let tag_lower = tag.to_lowercase();
@@ -575,9 +584,19 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
             images_with_ai_tags += 1;
             tags.extend(ai_tags.tags.clone());
 
+            // Add content rating as a tag if available
+            if let Some(content_rating) = &ai_tags.content_rating {
+                tags.push(content_rating.clone());
+            }
+
             // Mark these as AI tags
             for tag in &ai_tags.tags {
                 *tag_sources.entry(tag.clone()).or_insert(0) |= 1; // Bit 1: AI tag
+            }
+
+            // Mark content rating as AI tag if present
+            if let Some(content_rating) = &ai_tags.content_rating {
+                *tag_sources.entry(content_rating.clone()).or_insert(0) |= 1; // Bit 1: AI tag
             }
         }
 
@@ -596,7 +615,10 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
 
         for tag in tags {
             *tag_counts.entry(tag.clone()).or_insert(0) += 1;
-            tag_files.entry(tag).or_insert_with(Vec::new).push(path.clone());
+            tag_files
+                .entry(tag)
+                .or_insert_with(Vec::new)
+                .push(path.clone());
         }
     }
 
@@ -612,53 +634,73 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
     let total_images = image_paths.len();
     eprintln!("Total images: {}\n", total_images);
     eprintln!("Tag Source Statistics:");
-    eprintln!("  Images with AI tags: {} ({:.1}%)",
-             images_with_ai_tags,
-             (images_with_ai_tags as f32 / total_images as f32) * 100.0);
-    eprintln!("  Images with filename tags: {} ({:.1}%)",
-             images_with_filename_tags,
-             (images_with_filename_tags as f32 / total_images as f32) * 100.0);
+    eprintln!(
+        "  Images with AI tags: {} ({:.1}%)",
+        images_with_ai_tags,
+        (images_with_ai_tags as f32 / total_images as f32) * 100.0
+    );
+    eprintln!(
+        "  Images with filename tags: {} ({:.1}%)",
+        images_with_filename_tags,
+        (images_with_filename_tags as f32 / total_images as f32) * 100.0
+    );
     eprintln!();
 
     // Sort tags
     let mut tags_vec: Vec<(String, usize)> = tag_counts.into_iter().collect();
     match sort_by {
         "name" => tags_vec.sort_by(|a, b| a.0.cmp(&b.0)),
-        _ => tags_vec.sort_by(|a, b| b.1.cmp(&a.1)),  // Default: sort by count
+        _ => tags_vec.sort_by(|a, b| b.1.cmp(&a.1)), // Default: sort by count
     }
 
     // Find longest tag name for alignment
-    let max_tag_len = tags_vec.iter()
+    let max_tag_len = tags_vec
+        .iter()
         .map(|(tag, _)| tag.len())
         .max()
         .unwrap_or(10);
 
     eprintln!("Tags found: {}\n", tags_vec.len());
 
-    eprintln!("{:<width$} {:>8}  {:>10}  {:>12}  {}", "Tag", "Count", "Percentage", "Source", "Example Files",
-             width = max_tag_len);
-    eprintln!("{:-<width$} {:>8}  {:>10}  {:>12}  {}", "─", "─", "─", "─", "─",
-             width = max_tag_len);
+    eprintln!(
+        "{:<width$} {:>8}  {:>10}  {:>12}  {}",
+        "Tag",
+        "Count",
+        "Percentage",
+        "Source",
+        "Example Files",
+        width = max_tag_len
+    );
+    eprintln!(
+        "{:-<width$} {:>8}  {:>10}  {:>12}  {}",
+        "─",
+        "─",
+        "─",
+        "─",
+        "─",
+        width = max_tag_len
+    );
 
     for (tag, count) in &tags_vec {
         let percentage = (*count as f32 / total_images as f32) * 100.0;
 
         // Determine tag source
-        let source = tag_sources.get(tag)
-            .map(|&bits| {
-                match bits {
-                    1 => "AI",
-                    2 => "Filename",
-                    3 => "Both",
-                    _ => "?",
-                }
+        let source = tag_sources
+            .get(tag)
+            .map(|&bits| match bits {
+                1 => "AI",
+                2 => "Filename",
+                3 => "Both",
+                _ => "?",
             })
             .unwrap_or("?");
 
         // Show first few example files
-        let examples = tag_files.get(tag)
+        let examples = tag_files
+            .get(tag)
             .map(|files| {
-                files.iter()
+                files
+                    .iter()
                     .take(2)
                     .map(|f| {
                         // Extract just filename
@@ -672,22 +714,30 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
             })
             .unwrap_or_default();
 
-        eprintln!("{:<width$} {:>8}  {:>9.1}%  {:>12}  {}",
-                 tag,
-                 count,
-                 percentage,
-                 source,
-                 if examples.len() > 45 { &examples[..45] } else { &examples },
-                 width = max_tag_len);
+        eprintln!(
+            "{:<width$} {:>8}  {:>9.1}%  {:>12}  {}",
+            tag,
+            count,
+            percentage,
+            source,
+            if examples.len() > 45 {
+                &examples[..45]
+            } else {
+                &examples
+            },
+            width = max_tag_len
+        );
     }
 
     // Show summary
     let avg_images_per_tag = total_images as f32 / tags_vec.len() as f32;
     eprintln!("\nSummary:");
     eprintln!("  Average images per tag: {:.1}", avg_images_per_tag);
-    eprintln!("  Most common tag: \"{}\" ({} images)",
-             tags_vec.first().map(|(t, _)| t.as_str()).unwrap_or("none"),
-             tags_vec.first().map(|(_, c)| *c).unwrap_or(0));
+    eprintln!(
+        "  Most common tag: \"{}\" ({} images)",
+        tags_vec.first().map(|(t, _)| t.as_str()).unwrap_or("none"),
+        tags_vec.first().map(|(_, c)| *c).unwrap_or(0)
+    );
 
     Ok(())
 }
@@ -696,7 +746,9 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
 fn load_ai_tags(image_path: &str) -> Result<AITags> {
     // Get cache directory from default config
     let config = AITaggingConfig::default();
-    let cache_dir = config.cache_dir.ok_or_else(|| anyhow::anyhow!("Cache directory not configured"))?;
+    let cache_dir = config
+        .cache_dir
+        .ok_or_else(|| anyhow::anyhow!("Cache directory not configured"))?;
 
     // Load cached tags using ai_tagging module
     crate::ai_tagging::load_cached_tags(&cache_dir, image_path)
@@ -704,39 +756,90 @@ fn load_ai_tags(image_path: &str) -> Result<AITags> {
 
 /// Filter images by specific tags (OR logic - match any tag)
 pub fn filter_by_tags(images: Vec<ImageEntry>, tags: &[String]) -> Result<Vec<ImageEntry>> {
-    if tags.is_empty() {
+    filter_by_tags_advanced(images, tags, &[], &[])
+}
+
+/// Filter images by tags with AND/OR/NOT logic
+/// Supports comma-separated tags in arguments (e.g., "beach,sunset" = beach OR sunset)
+pub fn filter_by_tags_advanced(
+    images: Vec<ImageEntry>,
+    tags_or: &[String],
+    tags_and: &[String],
+    tags_not: &[String],
+) -> Result<Vec<ImageEntry>> {
+    if tags_or.is_empty() && tags_and.is_empty() && tags_not.is_empty() {
         return Ok(images);
     }
 
-    // Collect all valid image paths that have matching tags
-    let filtered_paths: Vec<String> = images.iter()
-        .filter(|img| {
-            // Try to get tags from multiple sources
-            let mut image_tags = extract_tags(&img.path);
+    let mut filter_parts = Vec::new();
+    if !tags_or.is_empty() {
+        filter_parts.push(format!("OR({})", tags_or.join(", ")));
+    }
+    if !tags_and.is_empty() {
+        filter_parts.push(format!("AND({})", tags_and.join(", ")));
+    }
+    if !tags_not.is_empty() {
+        filter_parts.push(format!("NOT({})", tags_not.join(", ")));
+    }
 
-            // Also try to load AI-generated tags
+    let tags_or_parsed: Vec<String> = tags_or
+        .iter()
+        .flat_map(|t| t.split(',').map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let tags_and_parsed: Vec<String> = tags_and
+        .iter()
+        .flat_map(|t| t.split(',').map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let tags_not_parsed: Vec<String> = tags_not
+        .iter()
+        .flat_map(|t| t.split(',').map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let filtered: Vec<ImageEntry> = images
+        .iter()
+        .filter(|img| {
+            let mut image_tags = extract_tags(&img.path);
             if let Ok(ai_tags) = load_ai_tags(&img.path) {
                 image_tags.extend(ai_tags.tags);
+                // Include content rating as a tag if available
+                if let Some(content_rating) = &ai_tags.content_rating {
+                    image_tags.push(content_rating.clone());
+                }
             }
 
-            // Check if any of the requested tags match
-            tags.iter().any(|requested_tag| {
-                image_tags.iter().any(|img_tag| {
-                    img_tag.to_lowercase() == requested_tag.to_lowercase()
-                })
-            })
+            let image_tags_lower: Vec<String> =
+                image_tags.iter().map(|t| t.to_lowercase()).collect();
+
+            let matches_or = tags_or_parsed.is_empty()
+                || tags_or_parsed
+                    .iter()
+                    .any(|requested_tag| image_tags_lower.contains(&requested_tag.to_lowercase()));
+
+            let matches_and = tags_and_parsed.is_empty()
+                || tags_and_parsed
+                    .iter()
+                    .all(|requested_tag| image_tags_lower.contains(&requested_tag.to_lowercase()));
+
+            let matches_not = tags_not_parsed.is_empty()
+                || !tags_not_parsed
+                    .iter()
+                    .any(|requested_tag| image_tags_lower.contains(&requested_tag.to_lowercase()));
+
+            matches_or && matches_and && matches_not
         })
-        .map(|img| img.path.clone())
+        .cloned()
         .collect();
 
-    // Now filter the original images
-    let filtered: Vec<ImageEntry> = images.into_iter()
-        .filter(|img| filtered_paths.contains(&img.path))
-        .collect();
-
-    eprintln!("Filtered to {} images by tags: {}",
-             filtered.len(),
-             tags.join(", "));
+    eprintln!(
+        "Filtered to {} images by: {}",
+        filtered.len(),
+        filter_parts.join(" + ")
+    );
 
     Ok(filtered)
 }

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::process::{Command, Stdio};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 /// Image analysis results
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,16 +9,16 @@ pub struct ImageFeatures {
     pub width: u32,
     pub height: u32,
     pub file_size: u64,
-    pub brightness: f32,  // 0.0 (dark) to 1.0 (bright)
-    pub dominant_color: String,  // Hex color
+    pub brightness: f32,        // 0.0 (dark) to 1.0 (bright)
+    pub dominant_color: String, // Hex color
     pub orientation: ImageOrientation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImageOrientation {
-    Landscape,  // width > height
-    Portrait,   // height > width
-    Square,     // width == height (within tolerance)
+    Landscape, // width > height
+    Portrait,  // height > width
+    Square,    // width == height (within tolerance)
 }
 
 /// Filter criteria for images
@@ -123,8 +123,7 @@ pub fn analyze_image(path: &str) -> Result<ImageFeatures> {
     let path_obj = Path::new(path);
 
     // Get file size
-    let metadata = std::fs::metadata(path_obj)
-        .context("Failed to get file metadata")?;
+    let metadata = std::fs::metadata(path_obj).context("Failed to get file metadata")?;
     let file_size = metadata.len();
 
     // Use ImageMagick identify to get image info
@@ -145,7 +144,7 @@ pub fn analyze_image(path: &str) -> Result<ImageFeatures> {
     // Get image dimensions and format
     let output = Command::new(identify_cmd)
         .arg("-format")
-        .arg("%w %h")  // width height
+        .arg("%w %h") // width height
         .arg(path)
         .output()
         .context("Failed to run identify command")?;
@@ -157,10 +156,8 @@ pub fn analyze_image(path: &str) -> Result<ImageFeatures> {
         anyhow::bail!("Failed to parse image info from identify");
     }
 
-    let width: u32 = parts[0].parse()
-        .context("Failed to parse width")?;
-    let height: u32 = parts[1].parse()
-        .context("Failed to parse height")?;
+    let width: u32 = parts[0].parse().context("Failed to parse width")?;
+    let height: u32 = parts[1].parse().context("Failed to parse height")?;
 
     // Determine orientation
     let aspect_ratio = width as f32 / height as f32;
@@ -175,19 +172,18 @@ pub fn analyze_image(path: &str) -> Result<ImageFeatures> {
     // Get brightness (using ImageMagick to analyze)
     let brightness_output = Command::new(identify_cmd)
         .arg("-format")
-        .arg("%[mean]")  // mean brightness
+        .arg("%[mean]") // mean brightness
         .arg(path)
         .output()
         .context("Failed to get brightness")?;
 
     let brightness_str = String::from_utf8_lossy(&brightness_output.stdout);
-    let brightness: f32 = brightness_str.trim().parse()
-        .unwrap_or(0.5) / 65535.0;  // ImageMagick returns 16-bit value
+    let brightness: f32 = brightness_str.trim().parse().unwrap_or(0.5) / 65535.0; // ImageMagick returns 16-bit value
 
     // Get dominant color (simplified - just take center pixel)
     let color_output = Command::new(identify_cmd)
         .arg("-format")
-        .arg("%[pixel:p{50%,50%}]")  // center pixel color
+        .arg("%[pixel:p{50%,50%}]") // center pixel color
         .arg(path)
         .output()
         .context("Failed to get dominant color")?;
@@ -212,7 +208,10 @@ pub fn parse_orientation(s: &str) -> Result<ImageOrientation> {
         "landscape" | "horizontal" | "h" => Ok(ImageOrientation::Landscape),
         "portrait" | "vertical" | "v" => Ok(ImageOrientation::Portrait),
         "square" | "s" => Ok(ImageOrientation::Square),
-        _ => anyhow::bail!("Invalid orientation: {}. Use: landscape, portrait, or square", s),
+        _ => anyhow::bail!(
+            "Invalid orientation: {}. Use: landscape, portrait, or square",
+            s
+        ),
     }
 }
 
@@ -220,12 +219,13 @@ pub fn parse_orientation(s: &str) -> Result<ImageOrientation> {
 pub fn parse_file_size(s: &str) -> Result<u64> {
     let s = s.trim().to_uppercase();
     let (num_str, _unit) = if s.ends_with('B') {
-        (&s[..s.len()-1], &s[s.len()-1..])
+        (&s[..s.len() - 1], &s[s.len() - 1..])
     } else {
         (s.as_str(), "")
     };
 
-    let num: f64 = num_str.trim_end_matches('K')
+    let num: f64 = num_str
+        .trim_end_matches('K')
         .trim_end_matches('M')
         .trim_end_matches('G')
         .trim_end_matches('T')
@@ -256,14 +256,26 @@ mod tests {
         assert_eq!(parse_file_size("100").unwrap(), 100);
         assert_eq!(parse_file_size("1K").unwrap(), 1024);
         assert_eq!(parse_file_size("1M").unwrap(), 1024 * 1024);
-        assert_eq!(parse_file_size("1.5M").unwrap(), (1.5 * 1024.0 * 1024.0) as u64);
+        assert_eq!(
+            parse_file_size("1.5M").unwrap(),
+            (1.5 * 1024.0 * 1024.0) as u64
+        );
     }
 
     #[test]
     fn test_parse_orientation() {
-        assert_eq!(parse_orientation("landscape").unwrap(), ImageOrientation::Landscape);
-        assert_eq!(parse_orientation("portrait").unwrap(), ImageOrientation::Portrait);
-        assert_eq!(parse_orientation("square").unwrap(), ImageOrientation::Square);
+        assert_eq!(
+            parse_orientation("landscape").unwrap(),
+            ImageOrientation::Landscape
+        );
+        assert_eq!(
+            parse_orientation("portrait").unwrap(),
+            ImageOrientation::Portrait
+        );
+        assert_eq!(
+            parse_orientation("square").unwrap(),
+            ImageOrientation::Square
+        );
         assert_eq!(parse_orientation("h").unwrap(), ImageOrientation::Landscape);
         assert_eq!(parse_orientation("v").unwrap(), ImageOrientation::Portrait);
     }

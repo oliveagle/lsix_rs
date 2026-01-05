@@ -1,15 +1,15 @@
 use anyhow::{Context, Result};
 use rayon::prelude::*;
-use std::process::{Command, Stdio};
-use std::io::{self, Write};
-use std::sync::OnceLock;
-use std::fs;
 use std::collections::hash_map::DefaultHasher;
+use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::{self, Write};
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 // Import filename types
 use crate::filename::FilenameMode;
-use crate::filter::{FilterConfig, analyze_image};
+use crate::filter::{analyze_image, FilterConfig};
 use crate::grouping::ImageGroup;
 
 /// ImageMagick command detection result
@@ -83,7 +83,7 @@ impl ImageConfig {
         let tilesize = if let Ok(size_str) = std::env::var("LSIX_TILESIZE") {
             size_str.parse().unwrap_or(360)
         } else {
-            360  // Fixed size, same as original script
+            360 // Fixed size, same as original script
         };
 
         let tile_width = tilesize;
@@ -214,10 +214,7 @@ pub struct ImageEntry {
 
 /// Process and display images in chunks, with concurrent loading
 /// Processes multiple rows in parallel for better performance
-pub fn process_images_concurrent(
-    images: Vec<ImageEntry>,
-    config: &ImageConfig,
-) -> Result<()> {
+pub fn process_images_concurrent(images: Vec<ImageEntry>, config: &ImageConfig) -> Result<()> {
     use rayon::prelude::*;
 
     // Process images in chunks (rows)
@@ -226,7 +223,7 @@ pub fn process_images_concurrent(
 
     // Process rows in parallel, but maintain order for display
     let results: Vec<Result<Vec<u8>>> = chunks
-        .par_iter()  // Parallel iteration over rows
+        .par_iter() // Parallel iteration over rows
         .map(|chunk| generate_sixel_output_cached(chunk, config))
         .collect();
 
@@ -252,11 +249,18 @@ pub fn process_images_grouped(
     for (group_idx, group) in groups.iter().enumerate() {
         // Print group header
         eprintln!("\n╔═══════════════════════════════════════════════════════════════");
-        eprintln!("║ Group {}: {} ({} images)", group_idx + 1, group.name, group.images.len());
+        eprintln!(
+            "║ Group {}: {} ({} images)",
+            group_idx + 1,
+            group.name,
+            group.images.len()
+        );
 
         // Show group metadata
         if !group.metadata.common_features.is_empty() {
-            let features: Vec<String> = group.metadata.common_features
+            let features: Vec<String> = group
+                .metadata
+                .common_features
                 .iter()
                 .map(|(k, v)| format!("{}: {}", k, v))
                 .collect();
@@ -283,7 +287,7 @@ pub fn process_images_grouped(
 
         // Add separator between groups
         if group_idx < groups.len() - 1 {
-            eprintln!("\n");  // Extra newline between groups
+            eprintln!("\n"); // Extra newline between groups
         }
     }
 
@@ -302,7 +306,7 @@ fn generate_sixel_output_cached(images: &[ImageEntry], config: &ImageConfig) -> 
             // Try to read from cache
             match fs::read(&cache_path) {
                 Ok(data) => return Ok(data),
-                Err(_) => {},
+                Err(_) => {}
             }
         }
 
@@ -337,7 +341,8 @@ fn generate_cache_key(images: &[ImageEntry], config: &ImageConfig) -> String {
         // Include file modification time in hash
         if let Ok(metadata) = fs::metadata(&img.path) {
             if let Ok(modified) = metadata.modified() {
-                modified.duration_since(std::time::UNIX_EPOCH)
+                modified
+                    .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs()
                     .hash(&mut hasher);
@@ -480,12 +485,18 @@ fn generate_sixel_output(images: &[ImageEntry], config: &ImageConfig) -> Result<
     // Wait for both processes to complete
     let montage_status = montage_child.wait()?;
     if !montage_status.success() {
-        anyhow::bail!("Montage command failed with exit code: {:?}", montage_status.code());
+        anyhow::bail!(
+            "Montage command failed with exit code: {:?}",
+            montage_status.code()
+        );
     }
 
     let convert_status = convert_child.wait()?;
     if !convert_status.success() {
-        anyhow::bail!("Convert command failed with exit code: {:?}", convert_status.code());
+        anyhow::bail!(
+            "Convert command failed with exit code: {:?}",
+            convert_status.code()
+        );
     }
 
     Ok(sixel_data)
@@ -493,7 +504,12 @@ fn generate_sixel_output(images: &[ImageEntry], config: &ImageConfig) -> Result<
 
 /// Pre-load and validate image files concurrently
 /// Returns only valid image entries that match the filter criteria
-pub fn validate_images_concurrent(paths: &[String], explicit: bool, mode: FilenameMode, filter_config: &FilterConfig) -> Vec<ImageEntry> {
+pub fn validate_images_concurrent(
+    paths: &[String],
+    explicit: bool,
+    mode: FilenameMode,
+    filter_config: &FilterConfig,
+) -> Vec<ImageEntry> {
     use crate::filename::{process_image_path, process_label_with_mode};
 
     // Check if any filter is active
@@ -551,9 +567,8 @@ pub fn validate_images_concurrent(paths: &[String], explicit: bool, mode: Filena
 pub fn expand_directories(paths: &[String]) -> Vec<String> {
     // Supported image extensions
     let image_extensions = [
-        "jpg", "jpeg", "png", "gif", "webp", "tiff", "tif",
-        "pnm", "ppm", "pgm", "pbm", "pam", "xbm", "xpm", "bmp",
-        "ico", "svg", "eps",
+        "jpg", "jpeg", "png", "gif", "webp", "tiff", "tif", "pnm", "ppm", "pgm", "pbm", "pam",
+        "xbm", "xpm", "bmp", "ico", "svg", "eps",
     ];
 
     let mut result = Vec::new();
@@ -597,9 +612,8 @@ pub fn expand_directories(paths: &[String]) -> Vec<String> {
 /// Recursively find all images in directory tree
 pub fn expand_directories_recursive(paths: &[String]) -> Vec<String> {
     let image_extensions = [
-        "jpg", "jpeg", "png", "gif", "webp", "tiff", "tif",
-        "pnm", "ppm", "pgm", "pbm", "pam", "xbm", "xpm", "bmp",
-        "ico", "svg", "eps",
+        "jpg", "jpeg", "png", "gif", "webp", "tiff", "tif", "pnm", "ppm", "pgm", "pbm", "pam",
+        "xbm", "xpm", "bmp", "ico", "svg", "eps",
     ];
 
     let mut result = Vec::new();

@@ -91,6 +91,7 @@ fn load_custom_prompt() -> Option<String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AITags {
     pub tags: Vec<String>,
+    pub content_rating: Option<String>,  // Content rating: "sfw" or "nsfw"
     pub confidence: f32,
     pub model: String,
     pub timestamp: i64,
@@ -129,24 +130,34 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
     } else {
         // Default prompt
         format!(
-            "You are an expert image tagging system. Identify the MAIN SUBJECTS and SPECIFIC OBJECTS in this image.\n\
+            "You are an expert image tagging and content rating system. Identify the MAIN SUBJECTS and SPECIFIC OBJECTS in this image, and provide content classification.\n\
             \n\
             Focus on:\n\
             1. PRIMARY OBJECTS (clothing, products, items, people)\n\
             2. SPECIFIC DETAILS (patterns, accessories, features)\n\
             3. STYLE/GENRE (business, casual, cartoon, realistic)\n\
             4. KEY ATTRIBUTES (colors, materials, mood)\n\
+            5. CONTENT CLASSIFICATION: Determine if content is appropriate for general audiences (SFW) or contains adult content (NSFW)\n\
+            \n\
+            CONTENT CLASSIFICATION GUIDELINES:\n\
+            - SFW (Safe For Work): Family-friendly content, no nudity, minimal skin exposure, no sexual content\n\
+            - NSFW (Not Safe For Work): Nudity, sexual content, excessive skin exposure, suggestive poses, adult themes\n\
+            - For anime/manga: Consider typical cultural norms, but flag explicit sexual content as NSFW\n\
+            - For artistic nudes: Generally NSFW unless clearly in educational/cultural context\n\
+            - For clothing: Bikinis/swimwear is context-dependent (beach/sport = often SFW, intimate setting = potentially NSFW)\n\
             \n\
             IGNORE background and minor details. Tag what the image is ABOUT.\n\
             \n\
-            Generate {} specific, accurate tags. Return ONLY comma-separated tags, no explanation.\n\
+            MANDATORY: You MUST provide exactly {} tags followed by content classification. Return ONLY comma-separated tags and classification in format: 'tag1, tag2, tag3, ... , sfw|nsfw'.\n\
             Tags should be: lowercase English, 1-2 words each, very specific.\n\
+            Content classification is MANDATORY and must be either 'sfw' (safe for work) or 'nsfw' (not safe for work) at the end.\n\
+            DO NOT provide any other text or explanation - ONLY the comma-separated tags and classification.\n\
             \n\
             Examples:\n\
-            - Photo of business suit: 'suit, formal, business, professional, office attire'\n\
-            - Cartoon rabbit with watch: 'cartoon, rabbit, watch, character, minimalist'\n\
-            - Beach photo: 'beach, ocean, sunset, sand, waves, horizon, tropical'\n\
-            - Portrait: 'portrait, person, face, smiling, casual, indoor'",
+            - Photo of business suit: 'suit, formal, business, professional, office attire, sfw'\n\
+            - Cartoon rabbit with watch: 'cartoon, rabbit, watch, character, minimalist, sfw'\n\
+            - Beach photo: 'beach, ocean, sunset, sand, waves, horizon, tropical, sfw'\n\
+            - Portrait: 'portrait, person, face, smiling, casual, indoor, sfw'",
             config.max_tags
         )
     };
@@ -268,29 +279,123 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
         eprintln!("\n🔍 Extracted tags text: \"{}\"", tags_text);
     }
 
-    // Parse tags
-    let tags: Vec<String> = tags_text
+    // Parse tags - split by comma and process
+    let all_parts: Vec<String> = tags_text
         .split(',')
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty() && s.len() > 2)
-        .take(config.max_tags)
         .collect();
+
+    // Separate content classification from regular tags
+    let mut regular_tags = Vec::new();
+    let mut content_classification = None;
+
+    for part in all_parts {
+        if part == "sfw" || part == "nsfw" {
+            content_classification = Some(part);
+        } else if regular_tags.len() < config.max_tags {
+            regular_tags.push(part);
+        }
+    }
+
+    // Add content classification as a tag if it exists
+    let mut tags = regular_tags;
+    if let Some(classification) = content_classification {
+        tags.push(classification);
+    }
+
+    // Extract content rating from tags if present
+    let mut content_rating = None;
+    let final_tags: Vec<String> = tags.into_iter().filter(|tag| {
+        if tag == "sfw" || tag == "nsfw" {
+            content_rating = Some(tag.clone());
+            false  // Remove from tags
+        } else {
+            true   // Keep in tags
+        }
+    }).collect();
+
+    // If no content rating was found, try to infer it from the tags or default to "sfw"
+    let final_content_rating = if content_rating.is_none() {
+        // Check if any tags suggest adult content with more comprehensive indicators
+        let has_adult_content = final_tags.iter().any(|tag| {
+            let lower_tag = tag.to_lowercase();
+            // Explicit adult content indicators
+            lower_tag.contains("nude") || lower_tag.contains("naked") ||
+            lower_tag.contains("sex") || lower_tag.contains("erotic") ||
+            lower_tag.contains("adult") || lower_tag.contains("porn") ||
+            lower_tag.contains("sexy") || lower_tag.contains("seductive") ||
+            // Body parts and suggestive terms
+            lower_tag.contains("nudity") || lower_tag.contains("breast") ||
+            lower_tag.contains("boob") || lower_tag.contains("butt") ||
+            lower_tag.contains("ass") || lower_tag.contains("thigh") ||
+            lower_tag.contains("underwear") || lower_tag.contains("lingerie") ||
+            lower_tag.contains("bikini") || lower_tag.contains("swimsuit") ||
+            lower_tag.contains("intimate") || lower_tag.contains("erogenous") ||
+            lower_tag.contains("arousal") || lower_tag.contains("arousing") ||
+            lower_tag.contains("provocative") || lower_tag.contains("suggestive") ||
+            lower_tag.contains("alluring") || lower_tag.contains("tempting") ||
+            lower_tag.contains("enticing") || lower_tag.contains("sultry") ||
+            // Anime/manga specific indicators
+            lower_tag.contains("hentai") || lower_tag.contains("ecchi") ||
+            lower_tag.contains("bishoujo") || lower_tag.contains("bishounen") ||
+            lower_tag.contains("bishoku") || lower_tag.contains("eromanga") ||
+            // Explicit terms
+            lower_tag.contains("raunchy") || lower_tag.contains("risque") ||
+            lower_tag.contains("lascivious") || lower_tag.contains("lewd") ||
+            lower_tag.contains("lustful") || lower_tag.contains("salacious") ||
+            lower_tag.contains("indecent") || lower_tag.contains("immodest") ||
+            lower_tag.contains("improper") || lower_tag.contains("unseemly") ||
+            // Clothing descriptors that suggest revealing nature
+            lower_tag.contains("skimpy") || lower_tag.contains("revealing") ||
+            lower_tag.contains("scantily") || lower_tag.contains("scanty") ||
+            lower_tag.contains("exposed") || lower_tag.contains("exposing") ||
+            lower_tag.contains("exposure") || lower_tag.contains("exhibition") ||
+            lower_tag.contains("undress") || lower_tag.contains("undressed") ||
+            lower_tag.contains("disrobe") || lower_tag.contains("disrobed") ||
+            lower_tag.contains("topless") || lower_tag.contains("bottomless") ||
+            lower_tag.contains("nipple") || lower_tag.contains("areola") ||
+            lower_tag.contains("genital") || lower_tag.contains("genitals") ||
+            lower_tag.contains("penis") || lower_tag.contains("vagina") ||
+            lower_tag.contains("pubic") || lower_tag.contains("crotch") ||
+            lower_tag.contains("groin") || lower_tag.contains("thong") ||
+            lower_tag.contains("micro") || lower_tag.contains("transparent") ||
+            lower_tag.contains("see-through") || lower_tag.contains("sheer") ||
+            lower_tag.contains("diaphanous") || lower_tag.contains("gauzy") ||
+            lower_tag.contains("gossamer") || lower_tag.contains("lacy") ||
+            lower_tag.contains("frilly") || lower_tag.contains("smoldering") ||
+            lower_tag.contains("smouldering") || lower_tag.contains("seductive")
+        });
+
+        if has_adult_content {
+            Some("nsfw".to_string())
+        } else {
+            // If no adult indicators, default to sfw
+            Some("sfw".to_string())
+        }
+    } else {
+        content_rating
+    };
 
     // Debug output for final tags
     if config.debug {
-        eprintln!("\n✅ Final parsed tags ({}):", tags.len());
-        for (i, tag) in tags.iter().enumerate() {
+        eprintln!("\n✅ Final parsed tags ({}):", final_tags.len());
+        for (i, tag) in final_tags.iter().enumerate() {
             eprintln!("  {}. \"{}\"", i + 1, tag);
+        }
+        if let Some(rating) = &final_content_rating {
+            eprintln!("  Content Rating: \"{}\"", rating);
         }
         eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗\n");
     }
 
-    if tags.is_empty() {
+    if final_tags.is_empty() {
         anyhow::bail!("No tags generated from AI response");
     }
 
     let ai_tags = AITags {
-        tags,
+        tags: final_tags,
+        content_rating: final_content_rating,
         confidence: 1.0,  // AI doesn't always provide confidence
         model: config.model.clone(),
         timestamp: chrono::Utc::now().timestamp(),

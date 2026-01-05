@@ -1,20 +1,23 @@
+mod ai_tagging;
 mod filename;
-mod image_proc;
-mod terminal;
 mod filter;
 mod grouping;
-mod ai_tagging;
+mod image_proc;
+mod terminal;
 
+use ai_tagging::{clear_ai_cache, tag_images_parallel, AITaggingConfig};
 use anyhow::{Context, Result};
 use clap::Parser;
-use image_proc::{expand_directories, expand_directories_recursive, validate_images_concurrent, process_images_concurrent, process_images_grouped, ImageConfig};
 use filename::FilenameMode;
-use filter::{FilterConfig, parse_orientation, parse_file_size};
-use grouping::{GroupBy, group_images};
-use ai_tagging::{AITaggingConfig, tag_images_parallel, clear_ai_cache};
+use filter::{parse_file_size, parse_orientation, FilterConfig};
+use grouping::{group_images, GroupBy};
+use image_proc::{
+    expand_directories, expand_directories_recursive, process_images_concurrent,
+    process_images_grouped, validate_images_concurrent, ImageConfig,
+};
+use std::io::{self, Write};
 use std::path::Path as StdPath;
 use std::process::Command;
-use std::io::{self, Write};
 
 /// lsix: like ls, but for images.
 /// Shows thumbnails of images with titles directly in terminal.
@@ -92,9 +95,17 @@ struct Args {
     #[arg(value_parser = clap::builder::PossibleValuesParser::new(["count", "name"]))]
     sort_tags_by: String,
 
-    /// Filter by specific tag (can be used multiple times)
+    /// Filter by specific tag (OR logic - match any tag)
     #[arg(long)]
     tag: Vec<String>,
+
+    /// Filter by specific tag (AND logic - must match all tags)
+    #[arg(long)]
+    tag_and: Vec<String>,
+
+    /// Filter by specific tag to exclude (NOT logic)
+    #[arg(long)]
+    tag_not: Vec<String>,
 
     // Directory options
     /// Recursive directory search
@@ -163,8 +174,7 @@ fn main() -> Result<()> {
     };
 
     // Auto-detect terminal capabilities (very fast now)
-    let term_config = terminal::autodetect()
-        .context("Terminal auto-detection failed")?;
+    let term_config = terminal::autodetect().context("Terminal auto-detection failed")?;
 
     // Handle --clear-ai-cache
     if args.clear_ai_cache {
@@ -196,7 +206,7 @@ fn main() -> Result<()> {
     // Handle --ai-tag option
     if args.ai_tag {
         let mut ai_config = AITaggingConfig::default();
-        ai_config.debug = args.debug;  // Set debug flag from command line
+        ai_config.debug = args.debug; // Set debug flag from command line
 
         // Only check API key if not using localhost
         if !ai_config.api_endpoint.contains("localhost") && ai_config.api_key.is_empty() {
@@ -211,9 +221,15 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
-        eprintln!("║                    AI Auto-Tagging Images                                    ║");
-        eprintln!("╚════════════════════════════════════════════════════════════════════════════╝\n");
+        eprintln!(
+            "\n╔════════════════════════════════════════════════════════════════════════════╗"
+        );
+        eprintln!(
+            "║                    AI Auto-Tagging Images                                    ║"
+        );
+        eprintln!(
+            "╚════════════════════════════════════════════════════════════════════════════╝\n"
+        );
 
         eprintln!("Model: {}", ai_config.model);
         eprintln!("API Endpoint: {}", ai_config.api_endpoint);
@@ -246,20 +262,32 @@ fn main() -> Result<()> {
         eprintln!("  Cache location: {:?}", ai_config.cache_dir);
 
         // Display all generated tags
-        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
-        eprintln!("║                    Generated Tags Preview                                   ║");
-        eprintln!("╚════════════════════════════════════════════════════════════════════════════╝\n");
+        eprintln!(
+            "\n╔════════════════════════════════════════════════════════════════════════════╗"
+        );
+        eprintln!(
+            "║                    Generated Tags Preview                                   ║"
+        );
+        eprintln!(
+            "╚════════════════════════════════════════════════════════════════════════════╝\n"
+        );
 
         for (path, tags) in ai_tags_map.iter() {
             if let Some(name) = StdPath::new(path).file_name() {
                 eprintln!("{}:", name.to_string_lossy());
                 eprintln!("  Tags: {}\n", tags.tags.join(", "));
+                if let Some(rating) = &tags.content_rating {
+                    eprintln!("  Content Rating: {}", rating.to_uppercase());
+                }
             }
         }
 
         eprintln!("💡 Tips:");
         eprintln!("  - Tags are cached for 30 days");
-        eprintln!("  - Use --tag <TAG> to filter by AI-generated tag");
+        eprintln!("  - Use --tag <TAG> to filter by AI-generated tag (OR logic)");
+        eprintln!("  - Use --tag-and <TAG> for AND logic (must match all)");
+        eprintln!("  - Use --tag-not <TAG> to exclude tags (NOT logic)");
+        eprintln!("  - Comma-separated tags: --tag \"beach,sunset\"");
         eprintln!("  - Use --clear-ai-cache to clear cache and regenerate");
         eprintln!("  - API costs vary by provider (gpt-4o-mini is cost-effective)\n");
 
@@ -268,7 +296,12 @@ fn main() -> Result<()> {
     }
 
     // Validate and process images concurrently with filtering
-    let images = validate_images_concurrent(&image_paths, !args.files.is_empty(), filename_mode, &filter_config);
+    let images = validate_images_concurrent(
+        &image_paths,
+        !args.files.is_empty(),
+        filename_mode,
+        &filter_config,
+    );
 
     if images.is_empty() {
         eprintln!("No valid images to display.");
@@ -281,25 +314,32 @@ fn main() -> Result<()> {
         use grouping::list_tag_statistics;
         let image_paths: Vec<String> = images.iter().map(|img| img.path.clone()).collect();
 
-        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
-        eprintln!("║                        Tag Statistics                                       ║");
-        eprintln!("╚════════════════════════════════════════════════════════════════════════════╝\n");
+        eprintln!(
+            "\n╔════════════════════════════════════════════════════════════════════════════╗"
+        );
+        eprintln!(
+            "║                        Tag Statistics                                       ║"
+        );
+        eprintln!(
+            "╚════════════════════════════════════════════════════════════════════════════╝\n"
+        );
 
         list_tag_statistics(&image_paths, &args.sort_tags_by)?;
 
         eprintln!("\n💡 Tips:");
-        eprintln!("  --tag <TAG>              Show only images with specific tag");
-        eprintln!("  --group-by tags          Group images by tag (one group at a time)");
-        eprintln!("  --tag <TAG> --tag <TAG> Show images with multiple tags (any match)\n");
+        eprintln!("  --tag <TAG>           Show images with tag (OR logic)");
+        eprintln!("  --tag-and <TAG>       Must match all tags (AND logic)");
+        eprintln!("  --tag-not <TAG>       Exclude images with tag (NOT logic)");
+        eprintln!("  Example: --tag beach --tag-not blurry");
+        eprintln!("  --group-by tags       Group images by tag\n");
 
         cleanup();
         return Ok(());
     }
 
-    // Filter by specific tags if --tag is provided
-    let images = if !args.tag.is_empty() {
-        use grouping::filter_by_tags;
-        filter_by_tags(images, &args.tag)?
+    let images = if !args.tag.is_empty() || !args.tag_and.is_empty() || !args.tag_not.is_empty() {
+        use grouping::filter_by_tags_advanced;
+        filter_by_tags_advanced(images, &args.tag, &args.tag_and, &args.tag_not)?
     } else {
         images
     };

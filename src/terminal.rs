@@ -53,7 +53,8 @@ fn query_terminal(sequence: &str, timeout_ms: u64) -> Result<Vec<u8>> {
                 response.push(byte[0]);
 
                 // Check for termination sequences
-                if response.ends_with(b"c") || response.ends_with(b"S") || response.ends_with(b"\\") {
+                if response.ends_with(b"c") || response.ends_with(b"S") || response.ends_with(b"\\")
+                {
                     break;
                 }
             }
@@ -86,8 +87,15 @@ pub fn detect_sixel() -> Result<bool> {
 
     // Check for common SIXEL-capable terminals by TERM value (fast path)
     let sixel_terminals = [
-        "xterm", "mlterm", "wezterm", "foot", "contour",
-        "kitty", "alacritty", "mintty", "cygwin",
+        "xterm",
+        "mlterm",
+        "wezterm",
+        "foot",
+        "contour",
+        "kitty",
+        "alacritty",
+        "mintty",
+        "cygwin",
     ];
 
     let term_lower = term.to_lowercase();
@@ -148,7 +156,7 @@ pub fn detect_colorscheme() -> Result<(String, String)> {
 
     // Use smart defaults - skip slow terminal queries
     // Most modern terminals are dark-themed
-    let background = "#282a36".to_string();  // Dracula-like dark background
+    let background = "#282a36".to_string(); // Dracula-like dark background
     let foreground = "white".to_string();
 
     Ok((background, foreground))
