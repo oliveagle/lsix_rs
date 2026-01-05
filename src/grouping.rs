@@ -472,7 +472,10 @@ fn extract_tags(path: &str) -> Vec<String> {
     if let Some(parent) = Path::new(path).parent() {
         if let Some(dir_name) = parent.file_name() {
             if let Some(dir_str) = dir_name.to_str() {
-                tags.push(dir_str.to_string());
+                let dir_str = dir_str.to_string();
+                if is_meaningful_tag(&dir_str) {
+                    tags.push(dir_str);
+                }
             }
         }
     }
@@ -483,7 +486,10 @@ fn extract_tags(path: &str) -> Vec<String> {
             // Split by common separators
             for part in name_str.split(&['_', '-', ' ', '.'][..]) {
                 if !part.is_empty() && part.len() > 2 {
-                    tags.push(part.to_string());
+                    let part = part.to_string();
+                    if is_meaningful_tag(&part) {
+                        tags.push(part);
+                    }
                 }
             }
         }
@@ -492,11 +498,50 @@ fn extract_tags(path: &str) -> Vec<String> {
     // Add extension as tag
     if let Some(ext) = Path::new(path).extension() {
         if let Some(ext_str) = ext.to_str() {
-            tags.push(ext_str.to_uppercase());
+            let ext_upper = ext_str.to_uppercase();
+            if is_meaningful_tag(&ext_upper) {
+                tags.push(ext_upper);
+            }
         }
     }
 
     tags
+}
+
+/// Check if a tag is meaningful (not just numbers or common patterns)
+fn is_meaningful_tag(tag: &str) -> bool {
+    // Filter out empty strings
+    if tag.is_empty() {
+        return false;
+    }
+
+    // Filter out pure numbers
+    if tag.chars().all(|c| c.is_numeric()) {
+        return false;
+    }
+
+    // Filter out very short tags (< 3 chars) unless it's extension
+    if tag.len() < 3 && !tag.starts_with('.') && tag.chars().all(|c| c.is_alphabetic()) {
+        return false;
+    }
+
+    // Filter out common patterns
+    let ignore_patterns = [
+        "img", "photo", "pic", "image", "dsc", "sam",
+        "001", "002", "003", "final", "copy", "version",
+    ];
+
+    let tag_lower = tag.to_lowercase();
+    if ignore_patterns.contains(&tag_lower.as_str()) {
+        return false;
+    }
+
+    // Must contain at least one letter
+    if !tag.chars().any(|c| c.is_alphabetic()) {
+        return false;
+    }
+
+    true
 }
 
 /// Get dominant color name from a group of images
