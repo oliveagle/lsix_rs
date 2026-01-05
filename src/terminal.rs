@@ -163,22 +163,9 @@ pub fn detect_geometry() -> Result<u32> {
         }
     }
 
-    // Method 1: Use COLUMNS environment variable with estimation
-    // This is fast and works in most cases
-    if let Ok(cols) = std::env::var("COLUMNS") {
-        if let Ok(col_count) = cols.trim().parse::<u32>() {
-            if col_count > 0 {
-                // Estimate pixel width: most terminals have ~9-10px per column
-                let estimated_width = col_count * 10;
-                if estimated_width >= 400 {
-                    return Ok(estimated_width);
-                }
-            }
-        }
-    }
-
-    // Default fallback (same as original script)
-    Ok(1024)
+    // Use a reasonable default for modern terminals
+    // Most users have widescreen displays (1920px or wider)
+    Ok(1920)
 }
 
 /// Auto-detect terminal capabilities and configuration
