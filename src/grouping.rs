@@ -623,28 +623,28 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
     }
 
     if tag_counts.is_empty() {
-        eprintln!("No tags found.");
-        eprintln!("💡 Tips:");
-        eprintln!("  - Run 'lsix --ai-tag <directory>' to generate AI tags");
-        eprintln!("  - Or rename files with descriptive names (e.g., vacation_beach_001.jpg)");
+        println!("No tags found.");
+        println!("💡 Tips:");
+        println!("  - Run 'lsix --ai-tag <directory>' to generate AI tags");
+        println!("  - Or rename files with descriptive names (e.g., vacation_beach_001.jpg)");
         return Ok(());
     }
 
     // Show tag source statistics
     let total_images = image_paths.len();
-    eprintln!("Total images: {}\n", total_images);
-    eprintln!("Tag Source Statistics:");
-    eprintln!(
+    println!("Total images: {}\n", total_images);
+    println!("Tag Source Statistics:");
+    println!(
         "  Images with AI tags: {} ({:.1}%)",
         images_with_ai_tags,
         (images_with_ai_tags as f32 / total_images as f32) * 100.0
     );
-    eprintln!(
+    println!(
         "  Images with filename tags: {} ({:.1}%)",
         images_with_filename_tags,
         (images_with_filename_tags as f32 / total_images as f32) * 100.0
     );
-    eprintln!();
+    println!();
 
     // Sort tags
     let mut tags_vec: Vec<(String, usize)> = tag_counts.into_iter().collect();
@@ -660,9 +660,9 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
         .max()
         .unwrap_or(10);
 
-    eprintln!("Tags found: {}\n", tags_vec.len());
+    println!("Tags found: {}\n", tags_vec.len());
 
-    eprintln!(
+    println!(
         "{:<width$} {:>8}  {:>10}  {:>12}  {}",
         "Tag",
         "Count",
@@ -671,7 +671,7 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
         "Example Files",
         width = max_tag_len
     );
-    eprintln!(
+    println!(
         "{:-<width$} {:>8}  {:>10}  {:>12}  {}",
         "─",
         "─",
@@ -714,7 +714,7 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
             })
             .unwrap_or_default();
 
-        eprintln!(
+        println!(
             "{:<width$} {:>8}  {:>9.1}%  {:>12}  {}",
             tag,
             count,
@@ -731,9 +731,9 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
 
     // Show summary
     let avg_images_per_tag = total_images as f32 / tags_vec.len() as f32;
-    eprintln!("\nSummary:");
-    eprintln!("  Average images per tag: {:.1}", avg_images_per_tag);
-    eprintln!(
+    println!("\nSummary:");
+    println!("  Average images per tag: {:.1}", avg_images_per_tag);
+    println!(
         "  Most common tag: \"{}\" ({} images)",
         tags_vec.first().map(|(t, _)| t.as_str()).unwrap_or("none"),
         tags_vec.first().map(|(_, c)| *c).unwrap_or(0)
