@@ -428,11 +428,11 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
                 // Create the image widget with fit mode to scale images to fit the cell
                 let image_widget = StatefulImage::new();
 
-                // Calculate a slightly smaller area for the image to avoid overlapping with border
+                // Calculate a significantly smaller area for the image to avoid overlapping with border and other images
                 let image_area = Rect {
-                    x: cell_area.x + 1,
-                    y: cell_area.y + 1,
-                    width: if cell_area.width > 2 { cell_area.width - 2 } else { cell_area.width },
+                    x: cell_area.x + 2,  // Increased margin
+                    y: cell_area.y + 1,  // Increased margin
+                    width: if cell_area.width > 4 { cell_area.width - 4 } else { cell_area.width },
                     height: if cell_area.height > 2 { cell_area.height - 2 } else { cell_area.height },
                 };
 
