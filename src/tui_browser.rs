@@ -393,17 +393,17 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
     app.preload_visible_images();
 
     // Calculate grid dimensions based on available space
-    // Minimum cell size to ensure images are visible
-    let min_cell_width = 10;
-    let min_cell_height = 6;
+    // Minimum cell size to ensure images are visible but allow larger images
+    let min_cell_width = 8;  // Reduced from 10 to allow more images
+    let min_cell_height = 4; // Reduced from 6 to allow more images
 
     // Calculate maximum possible columns and rows based on available space
     let max_cols = std::cmp::max(1, area.width / min_cell_width);
     let max_rows = std::cmp::max(1, area.height / min_cell_height);
 
-    // Set grid dimensions (with reasonable maximums to avoid tiny images)
-    app.grid_cols = std::cmp::min(max_cols, 10); // Cap at 10 columns to avoid tiny images
-    app.grid_rows = std::cmp::min(max_rows, 10); // Cap at 10 rows to avoid tiny images
+    // Set grid dimensions (with reasonable maximums to avoid too many tiny images)
+    app.grid_cols = std::cmp::min(max_cols, 8); // Reduced cap to show fewer but larger images
+    app.grid_rows = std::cmp::min(max_rows, 6); // Reduced cap to show fewer but larger images
 
     // Calculate the area for each image cell (without filename space)
     let cell_width = area.width / app.grid_cols;
