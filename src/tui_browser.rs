@@ -457,20 +457,25 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
         }
 
         // Create a protocol for the image for this specific render (to avoid state issues)
-        if let Some(mut image_protocol) = app.create_image_protocol(item_path) {
-            // Create the image widget with fit mode to scale images to fit the cell
-            let image_widget = StatefulImage::new();
+        if let Some(image_data) = app.image_cache.get(item_path) {
+            if let Some(ref picker) = app.picker {
+                // Create a new protocol instance for this specific render
+                let mut image_protocol = picker.new_resize_protocol(image_data.clone());
 
-            // Calculate a slightly smaller area for the image to avoid overlapping with border
-            let image_area = Rect {
-                x: cell_area.x + 1,
-                y: cell_area.y + 1,
-                width: if cell_area.width > 2 { cell_area.width - 2 } else { cell_area.width },
-                height: if cell_area.height > 2 { cell_area.height - 2 } else { cell_area.height },
-            };
+                // Create the image widget with fit mode to scale images to fit the cell
+                let image_widget = StatefulImage::new();
 
-            // Render the image in the smaller area to avoid overlapping with border
-            f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
+                // Calculate a slightly smaller area for the image to avoid overlapping with border
+                let image_area = Rect {
+                    x: cell_area.x + 1,
+                    y: cell_area.y + 1,
+                    width: if cell_area.width > 2 { cell_area.width - 2 } else { cell_area.width },
+                    height: if cell_area.height > 2 { cell_area.height - 2 } else { cell_area.height },
+                };
+
+                // Render the image in the smaller area to avoid overlapping with border
+                f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
+            }
         }
     }
 
