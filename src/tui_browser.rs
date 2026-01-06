@@ -33,7 +33,7 @@ pub struct TuiBrowser {
     pub grid_rows: u16,
     pub scroll_offset: usize,  // Track the scroll position
     // Cache for loaded images
-    pub image_cache: HashMap<String, StatefulProtocol>,
+    pub image_cache: HashMap<String, image::DynamicImage>,
     // Picker for image protocols
     pub picker: Option<Picker>,
 }
@@ -91,12 +91,8 @@ impl TuiBrowser {
         // Load the image using the image crate
         let img = ImageReader::open(path)?.decode()?;
 
-        // Create a protocol using the picker
-        if let Some(ref mut picker) = self.picker {
-            // Create a resize protocol that will scale the image appropriately
-            let protocol = picker.new_resize_protocol(img);
-            self.image_cache.insert(path.to_string(), protocol);
-        }
+        // Cache the original image data
+        self.image_cache.insert(path.to_string(), img);
 
         Ok(())
     }
@@ -122,8 +118,8 @@ impl TuiBrowser {
         }
     }
 
-    /// Get a cached image protocol, loading it if necessary
-    fn get_cached_image(&mut self, path: &str) -> Option<&mut StatefulProtocol> {
+    /// Create a protocol for the cached image, loading it if necessary
+    fn create_image_protocol(&mut self, path: &str) -> Option<StatefulProtocol> {
         // Try to load if not in cache
         if !self.image_cache.contains_key(path) {
             if let Err(_) = self.load_image_to_cache(path) {
@@ -132,7 +128,18 @@ impl TuiBrowser {
             }
         }
 
-        self.image_cache.get_mut(path)
+        // Get the cached image and create a new protocol for it
+        if let Some(img) = self.image_cache.get(path) {
+            if let Some(ref mut picker) = self.picker {
+                // Create a new resize protocol for this specific render
+                let protocol = picker.new_resize_protocol(img.clone());
+                Some(protocol)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     pub fn previous(&mut self) {
@@ -449,8 +456,8 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
             }
         }
 
-        // Get the cached image protocol for this path (should already be loaded)
-        if let Some(image_protocol) = app.get_cached_image(item_path) {
+        // Create a protocol for the image for this specific render (to avoid state issues)
+        if let Some(mut image_protocol) = app.create_image_protocol(item_path) {
             // Create the image widget with fit mode to scale images to fit the cell
             let image_widget = StatefulImage::new();
 
@@ -463,7 +470,7 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
             };
 
             // Render the image in the smaller area to avoid overlapping with border
-            f.render_stateful_widget(image_widget, image_area, image_protocol);
+            f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
         }
     }
 
