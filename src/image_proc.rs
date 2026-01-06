@@ -132,6 +132,43 @@ impl ImageConfig {
         }
     }
 
+    /// Create a new ImageConfig for fullscreen image display
+    /// Uses the full terminal width for larger image display
+    pub fn from_terminal_width_fullscreen(width: u32, num_colors: u32, bg: &str, fg: &str) -> Self {
+        let tile_width = (width.saturating_sub(100)).max(400);
+        let tile_height = tile_width;
+        let tile_xspace = 0;
+        let tile_yspace = 0;
+        let num_tiles_per_row = 1;
+        let font_size = (tile_width / 15).max(14);
+
+        let optimized_colors = if let Ok(colors_str) = std::env::var("LSIX_COLORS") {
+            colors_str.parse().unwrap_or(num_colors)
+        } else {
+            num_colors.max(256)
+        };
+
+        let shadow = if let Ok(shadow_str) = std::env::var("LSIX_SHADOW") {
+            shadow_str != "0"
+        } else {
+            true
+        };
+
+        Self {
+            tile_width,
+            tile_height,
+            tile_xspace,
+            tile_yspace,
+            num_tiles_per_row,
+            num_colors: optimized_colors,
+            background: bg.to_string(),
+            foreground: fg.to_string(),
+            font_family: None,
+            font_size,
+            shadow,
+        }
+    }
+
     /// Get ImageMagick montage options
     fn get_montage_options(&self) -> Vec<String> {
         let mut opts = Vec::new();

@@ -3,11 +3,13 @@ mod filename;
 mod filter;
 mod grouping;
 mod image_proc;
+mod term_image;
 mod terminal;
 mod tui_browser;
 
 use ai_tagging::{clear_ai_cache, tag_images_parallel, AITaggingConfig};
 use anyhow::{Context, Result};
+use term_image::render_image_grid;
 
 const BUILD_TIME: &str = include_str!(concat!(env!("OUT_DIR"), "/build_time.txt"));
 
@@ -398,7 +400,6 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Determine grouping strategy
     let group_strategy = match args.group_by.as_str() {
         "similarity" => GroupBy::Similarity,
         "color" => GroupBy::Color,
@@ -408,23 +409,12 @@ fn main() -> Result<()> {
         _ => GroupBy::None,
     };
 
-    // Create image configuration
-    let img_config = ImageConfig::from_terminal_width(
-        term_config.width,
-        term_config.num_colors,
-        &term_config.background,
-        &term_config.foreground,
-    );
-
-    // Process and display images (with or without grouping)
     if group_strategy != GroupBy::None {
-        // Extract image paths
         let image_paths: Vec<String> = images.iter().map(|img| img.path.clone()).collect();
 
         eprintln!("Grouping images by {:?}...", args.group_by);
         eprintln!("This may take a moment for analysis...");
 
-        // Group images
         let groups = group_images(&image_paths, group_strategy, args.similarity_threshold)
             .context("Image grouping failed")?;
 
@@ -436,11 +426,24 @@ fn main() -> Result<()> {
 
         eprintln!("Found {} group(s)", groups.len());
 
-        // Display grouped images
+        let img_config = ImageConfig::from_terminal_width(
+            term_config.width,
+            term_config.num_colors,
+            &term_config.background,
+            &term_config.foreground,
+        );
         process_images_grouped(groups, images, &img_config)?;
     } else {
-        // Process and display images without grouping
-        process_images_concurrent(images, &img_config)?;
+        let image_paths: Vec<String> = images.iter().map(|img| img.path.clone()).collect();
+        let num_columns = if let Ok(width_str) = std::env::var("LSIX_COLUMNS") {
+            width_str.parse().unwrap_or(3)
+        } else {
+            3
+        };
+
+        if let Err(e) = render_image_grid(&image_paths, num_columns) {
+            eprintln!("Error rendering images: {}", e);
+        }
     }
 
     // Skip the waiting part - just cleanup and exit

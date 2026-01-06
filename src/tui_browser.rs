@@ -27,8 +27,6 @@ fn trace_log(msg: &str) {
     }
 }
 
-use crate::image_proc::{ImageConfig, ImageEntry};
-use crate::terminal::autodetect;
 use image::ImageReader;
 use ratatui_image::{picker::Picker, StatefulImage};
 use std::collections::HashMap;
@@ -401,6 +399,7 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
             i, row, col, cell_area.x, cell_area.y, cell_area.width, cell_area.height, item_path
         ));
 
+        // Draw a border around the selected image cell
         if let Some(selected_idx) = app.state.selected() {
             let actual_idx = start_idx + i;
             if selected_idx == actual_idx && cell_area.width > 2 && cell_area.height > 1 {
@@ -418,22 +417,6 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
         if cell_area.height > 2 {
             cell_area.y += 1;
             cell_area.height -= 1;
-        }
-
-        // Draw a border around the selected image cell
-        if let Some(selected_idx) = app.state.selected() {
-            let actual_idx = start_idx + i;
-            if selected_idx == actual_idx && cell_area.width > 2 && cell_area.height > 1 {
-                let clear_block = Paragraph::new("").style(Style::default().bg(Color::Black));
-                f.render_widget(clear_block, cell_area);
-
-                let selection_block = Block::default().borders(Borders::ALL).border_style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                );
-                f.render_widget(selection_block, cell_area);
-            }
         }
 
         // Try to load the image if not already cached
@@ -498,52 +481,15 @@ fn display_single_image(image_path: &str) -> Result<(), std::io::Error> {
     use crossterm::execute;
     use std::io::stdout;
 
-    // Temporarily exit the TUI to display the image
     disable_raw_mode().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     let mut stdout = stdout();
     execute!(stdout, LeaveAlternateScreen)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-    // Auto-detect terminal capabilities
-    let term_config = autodetect().unwrap_or_else(|_| {
-        eprintln!("Warning: Could not detect terminal capabilities");
-        crate::terminal::TerminalConfig {
-            width: 80,
-            num_colors: 256,
-            background: "black".to_string(),
-            foreground: "white".to_string(),
-            has_sixel: false,
-        }
-    });
-
-    // Create image config based on terminal
-    let img_config = ImageConfig::from_terminal_width(
-        term_config.width,
-        term_config.num_colors,
-        &term_config.background,
-        &term_config.foreground,
-    );
-
-    // Create a single ImageEntry for the selected image
-    let image_entry = ImageEntry {
-        path: image_path.to_string(),
-        label: std::path::Path::new(image_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| image_path.to_string()),
-    };
-
-    // Process and display the single image
-    if let Err(e) = crate::image_proc::process_images_concurrent(vec![image_entry], &img_config) {
+    if let Err(e) = crate::term_image::display_single_image_interactive(image_path) {
         eprintln!("Error displaying image: {}", e);
     }
 
-    // Wait for a key press before returning to TUI
-    eprintln!("Press Enter to return to browser...");
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input).unwrap();
-
-    // Re-enter raw mode and alternate screen for TUI
     enable_raw_mode().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     execute!(stdout, EnterAlternateScreen)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
