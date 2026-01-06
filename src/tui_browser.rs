@@ -408,6 +408,17 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
 
             // Render the image in the cell area
             f.render_stateful_widget(image_widget, cell_area, image_protocol);
+
+            // Draw a border around the selected image
+            if let Some(selected_idx) = app.state.selected() {
+                let actual_idx = start_idx + i;
+                if selected_idx == actual_idx {
+                    let selection_block = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+                    f.render_widget(selection_block, cell_area);
+                }
+            }
         }
     }
 
