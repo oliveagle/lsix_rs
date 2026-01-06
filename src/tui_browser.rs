@@ -11,9 +11,21 @@ use ratatui::{
     widgets::{Block, Borders, ListState, Paragraph},
     Frame, Terminal,
 };
-use std::io::{self, stdout};
+use std::fs::OpenOptions;
+use std::io::{self, stdout, Write};
 
 use std::path::Path;
+
+fn trace_log(msg: &str) {
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/lsix_tui_trace.log")
+    {
+        let timestamp = chrono::Local::now().format("%H:%M:%S%.3f");
+        writeln!(file, "[{}] {}", timestamp, msg).ok();
+    }
+}
 
 use crate::image_proc::{ImageConfig, ImageEntry};
 use crate::terminal::autodetect;
@@ -352,6 +364,12 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
     let items_per_page = (app.grid_cols as usize * app.grid_rows as usize);
     let end_idx = std::cmp::min(start_idx + items_per_page, app.items.len());
 
+    trace_log(&format!(
+        "=== RENDER START ====\nscroll_offset: {}, grid: {}x{}, area: {:?}\ncells: {}x{}, start_idx: {}, end_idx: {}, items_to_render: {}",
+        app.scroll_offset, app.grid_cols, app.grid_rows, area,
+        app.grid_cols, app.grid_rows, start_idx, end_idx, end_idx - start_idx
+    ));
+
     let items_to_render: Vec<_> = app.items[start_idx..end_idx].to_vec();
 
     let clear_block = Paragraph::new("").style(Style::default().bg(Color::Black));
@@ -369,10 +387,33 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
             height: cell_height,
         };
 
-        // Add a small margin between cells
         if cell_area.width > 2 {
             cell_area.x += 1;
             cell_area.width -= 1;
+        }
+        if cell_area.height > 2 {
+            cell_area.y += 1;
+            cell_area.height -= 1;
+        }
+
+        trace_log(&format!(
+            "[{:2}] pos=({},{}) area=({},{},{},{}) file={}",
+            i, row, col, cell_area.x, cell_area.y, cell_area.width, cell_area.height, item_path
+        ));
+
+        if let Some(selected_idx) = app.state.selected() {
+            let actual_idx = start_idx + i;
+            if selected_idx == actual_idx && cell_area.width > 2 && cell_area.height > 1 {
+                let clear_block = Paragraph::new("").style(Style::default().bg(Color::Black));
+                f.render_widget(clear_block, cell_area);
+
+                let selection_block = Block::default().borders(Borders::ALL).border_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                );
+                f.render_widget(selection_block, cell_area);
+            }
         }
         if cell_area.height > 2 {
             cell_area.y += 1;
@@ -383,6 +424,9 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
         if let Some(selected_idx) = app.state.selected() {
             let actual_idx = start_idx + i;
             if selected_idx == actual_idx && cell_area.width > 2 && cell_area.height > 1 {
+                let clear_block = Paragraph::new("").style(Style::default().bg(Color::Black));
+                f.render_widget(clear_block, cell_area);
+
                 let selection_block = Block::default().borders(Borders::ALL).border_style(
                     Style::default()
                         .fg(Color::Yellow)
@@ -434,6 +478,11 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
             }
         }
     }
+
+    trace_log(&format!(
+        "=== RENDER END ====\nTotal items rendered: {}\n",
+        items_to_render.len()
+    ));
 
     // Add a border around the grid area with pagination info
     let page = (app.scroll_offset / items_per_page) + 1;
