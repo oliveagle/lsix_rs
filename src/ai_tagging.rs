@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::io::Read;
-use std::path::Path;
-use std::fs;
-use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
+use std::fs;
+use std::io::Read;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// AI tagging configuration
 #[derive(Debug, Clone)]
@@ -14,7 +14,6 @@ pub struct AITaggingConfig {
     pub api_key: String,
     pub model: String,
     pub max_tags: usize,
-    pub confidence_threshold: f32,
     pub cache_dir: Option<std::path::PathBuf>,
     pub custom_prompt: Option<String>,
     pub debug: bool,
@@ -22,13 +21,13 @@ pub struct AITaggingConfig {
 
 impl Default for AITaggingConfig {
     fn default() -> Self {
-        let api_key = std::env::var("LSIX_AI_API_KEY")
-            .unwrap_or_default();
+        let api_key = std::env::var("LSIX_AI_API_KEY").unwrap_or_default();
 
         // Detect if using local LLM (localhost or no API key)
         let is_local = std::env::var("LSIX_AI_ENDPOINT")
             .unwrap_or_default()
-            .contains("localhost") || api_key.is_empty();
+            .contains("localhost")
+            || api_key.is_empty();
 
         // Load custom prompt from config file
         let custom_prompt = load_custom_prompt();
@@ -37,24 +36,22 @@ impl Default for AITaggingConfig {
             api_endpoint: std::env::var("LSIX_AI_ENDPOINT")
                 .unwrap_or_else(|_| "https://api.openai.com/v1/chat/completions".to_string()),
             api_key,
-            model: std::env::var("LSIX_AI_MODEL")
-                .unwrap_or_else(|_| {
-                    if is_local {
-                        "Qwen3VL-8B-Instruct-Q8_0.gguf".to_string()
-                    } else {
-                        "gpt-4o-mini".to_string()
-                    }
-                }),
+            model: std::env::var("LSIX_AI_MODEL").unwrap_or_else(|_| {
+                if is_local {
+                    "Qwen3VL-8B-Instruct-Q8_0.gguf".to_string()
+                } else {
+                    "gpt-4o-mini".to_string()
+                }
+            }),
             max_tags: 10,
-            confidence_threshold: 0.5,
             cache_dir: Some(
                 std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
                     .join(".cache")
                     .join("lsix")
-                    .join("ai_tags")
+                    .join("ai_tags"),
             ),
             custom_prompt,
-            debug: false,  // Default to no debug output
+            debug: false, // Default to no debug output
         }
     }
 }
@@ -81,7 +78,10 @@ fn load_custom_prompt() -> Option<String> {
             }
         }
         Err(e) => {
-            eprintln!("Warning: Failed to read prompt file {:?}: {}", prompt_path, e);
+            eprintln!(
+                "Warning: Failed to read prompt file {:?}: {}",
+                prompt_path, e
+            );
             None
         }
     }
@@ -91,7 +91,7 @@ fn load_custom_prompt() -> Option<String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AITags {
     pub tags: Vec<String>,
-    pub content_rating: Option<String>,  // Content rating: "sfw" or "nsfw"
+    pub content_rating: Option<String>, // Content rating: "sfw" or "nsfw"
     pub confidence: f32,
     pub model: String,
     pub timestamp: i64,
@@ -164,20 +164,30 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
 
     // Debug output
     if config.debug {
-        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
-        eprintln!("║                    API Request Debug                                           ║");
+        eprintln!(
+            "\n╔════════════════════════════════════════════════════════════════════════════╗"
+        );
+        eprintln!(
+            "║                    API Request Debug                                           ║"
+        );
         eprintln!("╚════════════════════════════════════════════════════════════════════════════╝");
         eprintln!("\n📤 Sending request to: {}", config.api_endpoint);
         eprintln!("📝 Model: {}", config.model);
         eprintln!("📄 Image: {}", image_path);
-        eprintln!("📊 Image size: {} bytes (base64 encoded)", image_base64.len());
+        eprintln!(
+            "📊 Image size: {} bytes (base64 encoded)",
+            image_base64.len()
+        );
         eprintln!("\n📜 Prompt ({} characters):", prompt.len());
         eprintln!("────────────────────────────────────────────────────────────────");
         eprintln!("{}", prompt);
         eprintln!("────────────────────────────────────────────────────────────────");
     }
 
-    let request_body = if config.api_endpoint.contains("openai") || config.api_endpoint.contains("localhost") || config.api_endpoint.contains("v1/chat/completions") {
+    let request_body = if config.api_endpoint.contains("openai")
+        || config.api_endpoint.contains("localhost")
+        || config.api_endpoint.contains("v1/chat/completions")
+    {
         // OpenAI-compatible format (used by most local LLM servers too)
         json!({
             "model": config.model,
@@ -224,7 +234,11 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
         // Pretty print JSON, but truncate the base64 image data
         let debug_json = request_body.to_string();
         if debug_json.len() > 2000 {
-            eprintln!("{} ... (truncated, total {} chars)", &debug_json[..2000], debug_json.len());
+            eprintln!(
+                "{} ... (truncated, total {} chars)",
+                &debug_json[..2000],
+                debug_json.len()
+            );
         } else {
             eprintln!("{}", debug_json);
         }
@@ -233,7 +247,7 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
 
     // Call API
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))  // Longer timeout for local LLM
+        .timeout(std::time::Duration::from_secs(60)) // Longer timeout for local LLM
         .build()?;
 
     let mut request_builder = client
@@ -242,7 +256,8 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
 
     // Only add Authorization header if we have an API key
     if !config.api_key.is_empty() {
-        request_builder = request_builder.header("Authorization", format!("Bearer {}", config.api_key));
+        request_builder =
+            request_builder.header("Authorization", format!("Bearer {}", config.api_key));
     }
 
     let response = request_builder
@@ -257,17 +272,26 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
     }
 
     // Parse response
-    let response_json: serde_json::Value = response.json().context("Failed to parse AI response")?;
+    let response_json: serde_json::Value =
+        response.json().context("Failed to parse AI response")?;
 
     // Debug output for response
     if config.debug {
-        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗");
-        eprintln!("║                    API Response Debug                                          ║");
+        eprintln!(
+            "\n╔════════════════════════════════════════════════════════════════════════════╗"
+        );
+        eprintln!(
+            "║                    API Response Debug                                          ║"
+        );
         eprintln!("╚════════════════════════════════════════════════════════════════════════════╝");
         eprintln!("\n📥 Status: {}", status);
         eprintln!("\n📦 Full response JSON:");
         eprintln!("────────────────────────────────────────────────────────────────");
-        eprintln!("{}", serde_json::to_string_pretty(&response_json).unwrap_or_else(|_| "Failed to pretty print".to_string()));
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&response_json)
+                .unwrap_or_else(|_| "Failed to pretty print".to_string())
+        );
         eprintln!("────────────────────────────────────────────────────────────────");
     }
 
@@ -306,14 +330,17 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
 
     // Extract content rating from tags if present
     let mut content_rating = None;
-    let final_tags: Vec<String> = tags.into_iter().filter(|tag| {
-        if tag == "sfw" || tag == "nsfw" {
-            content_rating = Some(tag.clone());
-            false  // Remove from tags
-        } else {
-            true   // Keep in tags
-        }
-    }).collect();
+    let final_tags: Vec<String> = tags
+        .into_iter()
+        .filter(|tag| {
+            if tag == "sfw" || tag == "nsfw" {
+                content_rating = Some(tag.clone());
+                false // Remove from tags
+            } else {
+                true // Keep in tags
+            }
+        })
+        .collect();
 
     // If no content rating was found, try to infer it from the tags or default to "sfw"
     let final_content_rating = if content_rating.is_none() {
@@ -386,7 +413,9 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
         if let Some(rating) = &final_content_rating {
             eprintln!("  Content Rating: \"{}\"", rating);
         }
-        eprintln!("\n╔════════════════════════════════════════════════════════════════════════════╗\n");
+        eprintln!(
+            "\n╔════════════════════════════════════════════════════════════════════════════╗\n"
+        );
     }
 
     if final_tags.is_empty() {
@@ -396,7 +425,7 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
     let ai_tags = AITags {
         tags: final_tags,
         content_rating: final_content_rating,
-        confidence: 1.0,  // AI doesn't always provide confidence
+        confidence: 1.0, // AI doesn't always provide confidence
         model: config.model.clone(),
         timestamp: chrono::Utc::now().timestamp(),
         cache_hit: false,
@@ -411,19 +440,29 @@ pub fn tag_image_ai(image_path: &str, config: &AITaggingConfig, force: bool) -> 
 }
 
 /// Tag multiple images in parallel
-pub fn tag_images_parallel(image_paths: &[String], config: &AITaggingConfig, force: bool) -> Result<HashMap<String, AITags>> {
+pub fn tag_images_parallel(
+    image_paths: &[String],
+    config: &AITaggingConfig,
+    force: bool,
+) -> Result<HashMap<String, AITags>> {
     use rayon::prelude::*;
 
     // Create progress bar
-    let progress = Arc::new(Mutex::new(
-        indicatif::ProgressBar::new(image_paths.len() as u64)
-    ));
+    let progress = Arc::new(Mutex::new(indicatif::ProgressBar::new(
+        image_paths.len() as u64
+    )));
     let pb = progress.lock().unwrap();
-    pb.set_style(indicatif::ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-        .unwrap()
-        .progress_chars("##-"));
-    pb.set_message(if force { "Force regenerating tags..." } else { "Initializing..." });
+    pb.set_style(
+        indicatif::ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("##-"),
+    );
+    pb.set_message(if force {
+        "Force regenerating tags..."
+    } else {
+        "Initializing..."
+    });
     drop(pb);
 
     let results: Vec<(String, Result<AITags>)> = image_paths
@@ -432,8 +471,8 @@ pub fn tag_images_parallel(image_paths: &[String], config: &AITaggingConfig, for
             let result = tag_image_ai(path, config, force);
 
             // Update progress
-            if let Ok(ref tags) = result {
-                let mut pb = progress.lock().unwrap();
+            if let Ok(ref _tags) = result {
+                let pb = progress.lock().unwrap();
                 let filename = Path::new(path)
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -447,7 +486,7 @@ pub fn tag_images_parallel(image_paths: &[String], config: &AITaggingConfig, for
         .collect();
 
     // Finish progress bar
-    let mut pb = progress.lock().unwrap();
+    let pb = progress.lock().unwrap();
     pb.finish_with_message("AI tagging complete!");
     drop(pb);
 
@@ -500,7 +539,8 @@ fn encode_image_to_base64(image_path: &str) -> Result<String> {
     file.read_to_end(&mut buffer)?;
 
     // Encode to base64
-    Ok(base64::encode(&buffer))
+    use base64::Engine;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&buffer))
 }
 
 /// Extract tags from different AI response formats
@@ -542,7 +582,10 @@ fn cache_file_path(cache_dir: &std::path::Path, image_path: &str) -> std::path::
 }
 
 /// Generate alternative cache paths for lookup (try different path formats)
-fn get_cache_paths_to_try(cache_dir: &std::path::Path, image_path: &str) -> Vec<std::path::PathBuf> {
+fn get_cache_paths_to_try(
+    cache_dir: &std::path::Path,
+    image_path: &str,
+) -> Vec<std::path::PathBuf> {
     let mut paths_to_try = Vec::new();
 
     // Try exact path first
@@ -574,7 +617,10 @@ pub fn load_cached_tags(cache_dir: &std::path::Path, image_path: &str) -> Result
         }
     }
 
-    anyhow::bail!("Cache not found (tried {} path formats)", paths_to_try.len())
+    anyhow::bail!(
+        "Cache not found (tried {} path formats)",
+        paths_to_try.len()
+    )
 }
 
 /// Save tags to cache

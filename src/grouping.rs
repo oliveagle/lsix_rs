@@ -576,11 +576,11 @@ pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> 
 
     for path in image_paths {
         let mut tags = Vec::new();
-        let mut has_ai_tags = false;
+        let mut _has_ai_tags = false;
 
         // Try to load AI-generated tags first
         if let Ok(ai_tags) = load_ai_tags(path) {
-            has_ai_tags = true;
+            _has_ai_tags = true;
             images_with_ai_tags += 1;
             tags.extend(ai_tags.tags.clone());
 

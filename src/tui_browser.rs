@@ -4,37 +4,32 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    backend::{CrosstermBackend},
+    backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, ListState, Paragraph},
     Frame, Terminal,
 };
 use std::io::{self, stdout};
 
 use std::path::Path;
 
-// Import the image processing functionality and ratatui-image
 use crate::image_proc::{ImageConfig, ImageEntry};
 use crate::terminal::autodetect;
-use ratatui_image::{picker::Picker, StatefulImage};
 use image::ImageReader;
+use ratatui_image::{picker::Picker, StatefulImage};
 use std::collections::HashMap;
 
-
-// Define the application state
 pub struct TuiBrowser {
     pub items: Vec<String>,
-    pub state: ListState,  // This will track the selected item index
+    pub state: ListState,
     pub current_dir: String,
     pub selected_image: Option<String>,
     pub grid_cols: u16,
     pub grid_rows: u16,
-    pub scroll_offset: usize,  // Track the scroll position
-    // Cache for loaded images
+    pub scroll_offset: usize,
     pub image_cache: HashMap<String, image::DynamicImage>,
-    // Picker for image protocols
     pub picker: Option<Picker>,
 }
 
@@ -57,9 +52,9 @@ impl TuiBrowser {
             state,
             current_dir,
             selected_image: None,
-            grid_cols: 5, // Requested number of columns
-            grid_rows: 0, // Will be calculated based on available space
-            scroll_offset: 0, // Initialize scroll offset
+            grid_cols: 5,
+            grid_rows: 0,
+            scroll_offset: 0,
             image_cache: HashMap::new(),
             picker,
         }
@@ -80,9 +75,6 @@ impl TuiBrowser {
         self.update_selected_image();
         self.ensure_selection_visible();
     }
-
-
-
 
     pub fn previous(&mut self) {
         let i = match self.state.selected() {
@@ -141,7 +133,7 @@ pub fn run_tui_browser(image_paths: Vec<String>) -> Result<(), Box<dyn std::erro
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .to_string_lossy()
         .to_string();
-    
+
     let mut app = TuiBrowser::new(image_paths, current_dir);
 
     // Run the main loop
@@ -194,7 +186,7 @@ fn run_app(
                             }
                         }
                     }
-                },
+                }
                 KeyCode::Up => {
                     if let Some(selected) = app.state.selected() {
                         let row = selected / app.grid_cols as usize;
@@ -212,7 +204,8 @@ fn run_app(
                             }
                         } else {
                             // If we're at the top row, wrap to bottom
-                            let total_rows = (app.items.len() + app.grid_cols as usize - 1) / app.grid_cols as usize;
+                            let total_rows = (app.items.len() + app.grid_cols as usize - 1)
+                                / app.grid_cols as usize;
                             if total_rows > 1 {
                                 let bottom_row = total_rows - 1;
                                 let bottom_idx = bottom_row * app.grid_cols as usize + col;
@@ -225,8 +218,9 @@ fn run_app(
                             }
                         }
                     }
-                },
-                KeyCode::Left => { // Move left in grid
+                }
+                KeyCode::Left => {
+                    // Move left in grid
                     if let Some(selected) = app.state.selected() {
                         if selected > 0 {
                             app.state.select(Some(selected - 1));
@@ -235,7 +229,8 @@ fn run_app(
                         }
                     }
                 }
-                KeyCode::Right => { // Move right in grid
+                KeyCode::Right => {
+                    // Move right in grid
                     if let Some(selected) = app.state.selected() {
                         let next_idx = selected + 1;
                         if next_idx < app.items.len() {
@@ -266,7 +261,8 @@ fn run_app(
                     // Move down by one page (grid size)
                     let items_per_page = (app.grid_cols * app.grid_rows) as usize;
                     let current = app.state.selected().unwrap_or(0);
-                    let new_index = std::cmp::min(current + items_per_page, app.items.len().saturating_sub(1));
+                    let new_index =
+                        std::cmp::min(current + items_per_page, app.items.len().saturating_sub(1));
                     app.state.select(Some(new_index));
                     app.update_selected_image();
                     app.ensure_selection_visible();
@@ -297,9 +293,9 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(0),     // Main content (thumbnails)
-            Constraint::Length(3),  // Status bar
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Main content (thumbnails)
+            Constraint::Length(3), // Status bar
         ])
         .split(f.size());
 
@@ -340,29 +336,22 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
 }
 
 fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
-    // Calculate grid dimensions based on available space
-    // Use larger minimum cell size to ensure images are more visible
-    let min_cell_width = 12;  // Increased to ensure larger images
-    let min_cell_height = 8;  // Increased to ensure larger images
+    let min_cell_width = 12;
+    let min_cell_height = 8;
 
-    // Calculate maximum possible columns and rows based on available space
     let max_cols = std::cmp::max(1, area.width / min_cell_width);
     let max_rows = std::cmp::max(1, area.height / min_cell_height);
 
-    // Set grid dimensions (with smaller maximums to show fewer but much larger images)
-    app.grid_cols = std::cmp::min(max_cols, 5); // Further reduced to show fewer but larger images
-    app.grid_rows = std::cmp::min(max_rows, 3); // Further reduced to show fewer but larger images
+    app.grid_cols = std::cmp::min(max_cols, 5);
+    app.grid_rows = std::cmp::min(max_rows, 3);
 
-    // Calculate the area for each image cell (without filename space)
     let cell_width = area.width / app.grid_cols;
     let cell_height = area.height / app.grid_rows;
 
-    // Calculate the starting index based on scrolling position
     let start_idx = app.scroll_offset;
     let items_per_page = (app.grid_cols as usize * app.grid_rows as usize);
     let end_idx = std::cmp::min(start_idx + items_per_page, app.items.len());
 
-    // Pre-load all needed images to avoid borrowing issues
     let items_to_render: Vec<_> = app.items[start_idx..end_idx].to_vec();
 
     for (i, item_path) in items_to_render.iter().enumerate() {
@@ -391,9 +380,11 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
         if let Some(selected_idx) = app.state.selected() {
             let actual_idx = start_idx + i;
             if selected_idx == actual_idx && cell_area.width > 2 && cell_area.height > 1 {
-                let selection_block = Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+                let selection_block = Block::default().borders(Borders::ALL).border_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                );
                 f.render_widget(selection_block, cell_area);
             }
         }
@@ -401,42 +392,43 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
         // Try to load the image if not already cached
         if !app.image_cache.contains_key(item_path) {
             match ImageReader::open(item_path) {
-                Ok(reader) => {
-                    match reader.decode() {
-                        Ok(img) => {
-                            app.image_cache.insert(item_path.to_string(), img);
-                        }
-                        Err(_) => {
-                            // Skip if image can't be decoded
-                            continue;
-                        }
+                Ok(reader) => match reader.decode() {
+                    Ok(img) => {
+                        app.image_cache.insert(item_path.to_string(), img);
                     }
-                }
+                    Err(_) => {
+                        continue;
+                    }
+                },
                 Err(_) => {
-                    // Skip if image can't be opened
                     continue;
                 }
             }
         }
 
-        // Create a protocol for the image for this specific render (to avoid state issues)
         if let Some(image_data) = app.image_cache.get(item_path) {
             if let Some(ref picker) = app.picker {
-                // Create a new protocol instance for this specific render
                 let mut image_protocol = picker.new_resize_protocol(image_data.clone());
 
-                // Create the image widget with fit mode to scale images to fit the cell
                 let image_widget = StatefulImage::new();
 
-                // Calculate a significantly smaller area for the image to avoid overlapping with border and other images
                 let image_area = Rect {
-                    x: cell_area.x + 2,  // Increased margin
-                    y: cell_area.y + 1,  // Increased margin
-                    width: if cell_area.width > 4 { cell_area.width - 4 } else { cell_area.width },
-                    height: if cell_area.height > 2 { cell_area.height - 2 } else { cell_area.height },
+                    x: cell_area.x + 2,
+                    y: cell_area.y + 1,
+                    width: if cell_area.width > 4 {
+                        cell_area.width - 4
+                    } else {
+                        cell_area.width
+                    },
+                    height: if cell_area.height > 2 {
+                        cell_area.height - 2
+                    } else {
+                        cell_area.height
+                    },
                 };
 
-                // Render the image in the smaller area to avoid overlapping with border
+                let clear_block = Paragraph::new("").style(Style::default().bg(Color::Black));
+                f.render_widget(clear_block, image_area);
                 f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
             }
         }
@@ -445,9 +437,10 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
     // Add a border around the grid area with pagination info
     let page = (app.scroll_offset / items_per_page) + 1;
     let total_pages = (app.items.len() + items_per_page - 1) / items_per_page;
-    let grid_block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!("Image Grid ({}x{}) - Page {}/{}", app.grid_cols, app.grid_rows, page, total_pages));
+    let grid_block = Block::default().borders(Borders::ALL).title(format!(
+        "Image Grid ({}x{}) - Page {}/{}",
+        app.grid_cols, app.grid_rows, page, total_pages
+    ));
     f.render_widget(grid_block, area);
 }
 
@@ -458,7 +451,8 @@ fn display_single_image(image_path: &str) -> Result<(), std::io::Error> {
     // Temporarily exit the TUI to display the image
     disable_raw_mode().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     let mut stdout = stdout();
-    execute!(stdout, LeaveAlternateScreen).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    execute!(stdout, LeaveAlternateScreen)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     // Auto-detect terminal capabilities
     let term_config = autodetect().unwrap_or_else(|_| {
@@ -501,7 +495,8 @@ fn display_single_image(image_path: &str) -> Result<(), std::io::Error> {
 
     // Re-enter raw mode and alternate screen for TUI
     enable_raw_mode().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    execute!(stdout, EnterAlternateScreen).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    execute!(stdout, EnterAlternateScreen)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     Ok(())
 }

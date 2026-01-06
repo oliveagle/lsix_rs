@@ -4,9 +4,13 @@ mod filter;
 mod grouping;
 mod image_proc;
 mod terminal;
+mod tui_browser;
 
 use ai_tagging::{clear_ai_cache, tag_images_parallel, AITaggingConfig};
 use anyhow::{Context, Result};
+
+const BUILD_TIME: &str = include_str!(concat!(env!("OUT_DIR"), "/build_time.txt"));
+
 use clap::Parser;
 use filename::FilenameMode;
 use filter::{parse_file_size, parse_orientation, FilterConfig};
@@ -128,6 +132,10 @@ struct Args {
     /// Enable debug output for AI API calls
     #[arg(long)]
     debug: bool,
+
+    /// Start TUI browser mode for image navigation
+    #[arg(long)]
+    tui: bool,
 }
 
 /// Cleanup handler to stop SIXEL and reset terminal
@@ -290,6 +298,46 @@ fn main() -> Result<()> {
         eprintln!("  - Comma-separated tags: --tag \"beach,sunset\"");
         eprintln!("  - Use --clear-ai-cache to clear cache and regenerate");
         eprintln!("  - API costs vary by provider (gpt-4o-mini is cost-effective)\n");
+
+        cleanup();
+        return Ok(());
+    }
+
+    // Handle --tui option
+    if args.tui {
+        // Auto-detect terminal capabilities (very fast now)
+        let _term_config = terminal::autodetect().context("Terminal auto-detection failed")?;
+
+        // Get list of image files
+        let image_paths = if args.files.is_empty() {
+            // No arguments - find images in current directory
+            filename::find_image_files()
+        } else {
+            // Arguments provided - expand any directories
+            if args.recursive {
+                image_proc::expand_directories_recursive(&args.files)
+            } else {
+                image_proc::expand_directories(&args.files)
+            }
+        };
+
+        if image_paths.is_empty() {
+            eprintln!("No image files found.");
+            cleanup();
+            return Ok(());
+        }
+
+        eprintln!("Starting TUI browser mode...");
+        eprintln!("Found {} images to browse.", image_paths.len());
+        eprintln!("Build time: {}", BUILD_TIME.trim());
+        eprintln!("Use hjkl to navigate, +/- to resize thumbnails, q to quit");
+
+        // Run the TUI browser
+        if let Err(e) = tui_browser::run_tui_browser(image_paths) {
+            eprintln!("TUI browser error: {}", e);
+            cleanup();
+            return Err(anyhow::anyhow!("TUI browser failed: {}", e));
+        }
 
         cleanup();
         return Ok(());

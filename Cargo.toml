@@ -21,3 +21,6 @@ image = { version = "0.25", features = ["jpeg", "png", "webp", "tiff", "bmp"] }
 crossterm = "0.28"
 ratatui = "0.30.0"
 ratatui-image = "10.0.2"
+
+[build-dependencies]
+chrono = "0.4"
