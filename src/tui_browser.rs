@@ -401,32 +401,32 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
             cell_area.height -= 1;
         }
 
+        // Draw a border around the selected image cell
+        if let Some(selected_idx) = app.state.selected() {
+            let actual_idx = start_idx + i;
+            if selected_idx == actual_idx && cell_area.width > 2 && cell_area.height > 1 {
+                let selection_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+                f.render_widget(selection_block, cell_area);
+            }
+        }
+
         // Get the cached image protocol for this path (should already be loaded)
         if let Some(image_protocol) = app.get_cached_image(item_path) {
             // Create the image widget with fit mode to scale images to fit the cell
             let image_widget = StatefulImage::new();
 
-            // Render the image in the cell area
-            f.render_stateful_widget(image_widget, cell_area, image_protocol);
-        }
+            // Calculate a slightly smaller area for the image to avoid overlapping with border
+            let image_area = Rect {
+                x: cell_area.x + 1,
+                y: cell_area.y + 1,
+                width: if cell_area.width > 2 { cell_area.width - 2 } else { cell_area.width },
+                height: if cell_area.height > 2 { cell_area.height - 2 } else { cell_area.height },
+            };
 
-        // Draw a selection indicator for the currently selected image
-        if let Some(selected_idx) = app.state.selected() {
-            let actual_idx = start_idx + i;
-            if selected_idx == actual_idx && cell_area.width >= 1 && cell_area.height >= 1 {
-                // Draw a small indicator in the corner of the cell
-                let indicator_area = Rect {
-                    x: cell_area.x,
-                    y: cell_area.y,
-                    width: 1.min(cell_area.width),
-                    height: 1.min(cell_area.height),
-                };
-
-                // Create a simple block with a character to indicate selection
-                let indicator = Paragraph::new("▶")
-                    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-                f.render_widget(indicator, indicator_area);
-            }
+            // Render the image in the smaller area to avoid overlapping with border
+            f.render_stateful_widget(image_widget, image_area, image_protocol);
         }
     }
 
