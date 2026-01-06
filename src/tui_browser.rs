@@ -18,8 +18,7 @@ use std::path::Path;
 // Import the image processing functionality and ratatui-image
 use crate::image_proc::{ImageConfig, ImageEntry};
 use crate::terminal::autodetect;
-use ratatui_image::{picker::Picker, StatefulImage, protocol::StatefulProtocol};
-use image::ImageReader;
+use ratatui_image::{picker::Picker, StatefulImage};
 use std::collections::HashMap;
 
 
@@ -81,66 +80,8 @@ impl TuiBrowser {
         self.ensure_selection_visible();
     }
 
-    /// Load an image and cache it for display
-    fn load_image_to_cache(&mut self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        // Check if image is already cached
-        if self.image_cache.contains_key(path) {
-            return Ok(());
-        }
 
-        // Load the image using the image crate
-        let img = ImageReader::open(path)?.decode()?;
 
-        // Cache the original image data
-        self.image_cache.insert(path.to_string(), img);
-
-        Ok(())
-    }
-
-    /// Preload images in the current view to reduce flickering
-    /// Only preload if images are not already cached
-    fn preload_visible_images(&mut self) {
-        let items_per_page = (self.grid_cols as usize * self.grid_rows as usize);
-        let start_idx = self.scroll_offset;
-        let end_idx = std::cmp::min(start_idx + items_per_page, self.items.len());
-
-        // Collect paths that are not yet cached to avoid unnecessary loading
-        let paths_to_load: Vec<String> = self.items[start_idx..end_idx]
-            .iter()
-            .filter(|path| !self.image_cache.contains_key(*path))
-            .map(|s| s.clone())
-            .collect();
-
-        for path in paths_to_load {
-            if let Err(_) = self.load_image_to_cache(&path) {
-                // If loading fails, continue with other images
-            }
-        }
-    }
-
-    /// Create a protocol for the cached image, loading it if necessary
-    fn create_image_protocol(&mut self, path: &str) -> Option<StatefulProtocol> {
-        // Try to load if not in cache
-        if !self.image_cache.contains_key(path) {
-            if let Err(_) = self.load_image_to_cache(path) {
-                // If loading fails, we can't return a valid image
-                return None;
-            }
-        }
-
-        // Get the cached image and create a new protocol for it
-        if let Some(img) = self.image_cache.get(path) {
-            if let Some(ref mut picker) = self.picker {
-                // Create a new resize protocol for this specific render
-                let protocol = picker.new_resize_protocol(img.clone());
-                Some(protocol)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
 
     pub fn previous(&mut self) {
         let i = match self.state.selected() {
