@@ -102,14 +102,16 @@ impl TuiBrowser {
     }
 
     /// Preload images in the current view to reduce flickering
+    /// Only preload if images are not already cached
     fn preload_visible_images(&mut self) {
         let items_per_page = (self.grid_cols as usize * self.grid_rows as usize);
         let start_idx = self.scroll_offset;
         let end_idx = std::cmp::min(start_idx + items_per_page, self.items.len());
 
-        // Collect paths to avoid borrowing issues
+        // Collect paths that are not yet cached to avoid unnecessary loading
         let paths_to_load: Vec<String> = self.items[start_idx..end_idx]
             .iter()
+            .filter(|path| !self.image_cache.contains_key(*path))
             .map(|s| s.clone())
             .collect();
 
@@ -389,9 +391,6 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
 }
 
 fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
-    // Preload visible images to reduce flickering
-    app.preload_visible_images();
-
     // Calculate grid dimensions based on available space
     // Use larger minimum cell size to ensure images are more visible
     let min_cell_width = 12;  // Increased to ensure larger images
