@@ -19,6 +19,7 @@ use std::path::Path;
 use crate::image_proc::{ImageConfig, ImageEntry};
 use crate::terminal::autodetect;
 use ratatui_image::{picker::Picker, StatefulImage};
+use image::ImageReader;
 use std::collections::HashMap;
 
 
@@ -394,6 +395,27 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
                 f.render_widget(selection_block, cell_area);
+            }
+        }
+
+        // Try to load the image if not already cached
+        if !app.image_cache.contains_key(item_path) {
+            match ImageReader::open(item_path) {
+                Ok(reader) => {
+                    match reader.decode() {
+                        Ok(img) => {
+                            app.image_cache.insert(item_path.to_string(), img);
+                        }
+                        Err(_) => {
+                            // Skip if image can't be decoded
+                            continue;
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Skip if image can't be opened
+                    continue;
+                }
             }
         }
 
