@@ -222,10 +222,114 @@ fn run_app(
         if let Event::Key(key) = event::read()? {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Char('j') => app.next(),
-                KeyCode::Down => app.next(),
-                KeyCode::Char('k') => app.previous(),
-                KeyCode::Up => app.previous(),
+                KeyCode::Char('j') => {
+                    // Move down in the grid (same as down arrow)
+                    if let Some(selected) = app.state.selected() {
+                        let row = selected / app.grid_cols as usize;
+                        let col = selected % app.grid_cols as usize;
+                        let next_row = row + 1;
+                        let next_idx = next_row * app.grid_cols as usize + col;
+
+                        if next_idx < app.items.len() {
+                            app.state.select(Some(next_idx));
+                            app.update_selected_image();
+                            app.ensure_selection_visible();
+                        } else {
+                            // If we're at the bottom row, wrap to top
+                            let top_idx = col;
+                            if top_idx < app.items.len() {
+                                app.state.select(Some(top_idx));
+                                app.update_selected_image();
+                                app.ensure_selection_visible();
+                            }
+                        }
+                    }
+                },
+                KeyCode::Down => {
+                    if let Some(selected) = app.state.selected() {
+                        let row = selected / app.grid_cols as usize;
+                        let col = selected % app.grid_cols as usize;
+                        let next_row = row + 1;
+                        let next_idx = next_row * app.grid_cols as usize + col;
+
+                        if next_idx < app.items.len() {
+                            app.state.select(Some(next_idx));
+                            app.update_selected_image();
+                            app.ensure_selection_visible();
+                        } else {
+                            // If we're at the bottom row, wrap to top
+                            let top_idx = col;
+                            if top_idx < app.items.len() {
+                                app.state.select(Some(top_idx));
+                                app.update_selected_image();
+                                app.ensure_selection_visible();
+                            }
+                        }
+                    }
+                },
+                KeyCode::Char('k') => {
+                    // Move up in the grid (same as up arrow)
+                    if let Some(selected) = app.state.selected() {
+                        let row = selected / app.grid_cols as usize;
+                        let col = selected % app.grid_cols as usize;
+
+                        if row > 0 {
+                            // Move up to the same column in the previous row
+                            let prev_row = row - 1;
+                            let prev_idx = prev_row * app.grid_cols as usize + col;
+
+                            if prev_idx < app.items.len() {
+                                app.state.select(Some(prev_idx));
+                                app.update_selected_image();
+                                app.ensure_selection_visible();
+                            }
+                        } else {
+                            // If we're at the top row, wrap to bottom
+                            let total_rows = (app.items.len() + app.grid_cols as usize - 1) / app.grid_cols as usize;
+                            if total_rows > 1 {
+                                let bottom_row = total_rows - 1;
+                                let bottom_idx = bottom_row * app.grid_cols as usize + col;
+
+                                if bottom_idx < app.items.len() {
+                                    app.state.select(Some(bottom_idx));
+                                    app.update_selected_image();
+                                    app.ensure_selection_visible();
+                                }
+                            }
+                        }
+                    }
+                },
+                KeyCode::Up => {
+                    if let Some(selected) = app.state.selected() {
+                        let row = selected / app.grid_cols as usize;
+                        let col = selected % app.grid_cols as usize;
+
+                        if row > 0 {
+                            // Move up to the same column in the previous row
+                            let prev_row = row - 1;
+                            let prev_idx = prev_row * app.grid_cols as usize + col;
+
+                            if prev_idx < app.items.len() {
+                                app.state.select(Some(prev_idx));
+                                app.update_selected_image();
+                                app.ensure_selection_visible();
+                            }
+                        } else {
+                            // If we're at the top row, wrap to bottom
+                            let total_rows = (app.items.len() + app.grid_cols as usize - 1) / app.grid_cols as usize;
+                            if total_rows > 1 {
+                                let bottom_row = total_rows - 1;
+                                let bottom_idx = bottom_row * app.grid_cols as usize + col;
+
+                                if bottom_idx < app.items.len() {
+                                    app.state.select(Some(bottom_idx));
+                                    app.update_selected_image();
+                                    app.ensure_selection_visible();
+                                }
+                            }
+                        }
+                    }
+                },
                 KeyCode::Char('h') => { // Move left in grid
                     if let Some(selected) = app.state.selected() {
                         if selected > 0 {
