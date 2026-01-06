@@ -408,16 +408,24 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
 
             // Render the image in the cell area
             f.render_stateful_widget(image_widget, cell_area, image_protocol);
+        }
 
-            // Draw a border around the selected image
-            if let Some(selected_idx) = app.state.selected() {
-                let actual_idx = start_idx + i;
-                if selected_idx == actual_idx {
-                    let selection_block = Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-                    f.render_widget(selection_block, cell_area);
-                }
+        // Draw a selection indicator for the currently selected image
+        if let Some(selected_idx) = app.state.selected() {
+            let actual_idx = start_idx + i;
+            if selected_idx == actual_idx && cell_area.width >= 1 && cell_area.height >= 1 {
+                // Draw a small indicator in the corner of the cell
+                let indicator_area = Rect {
+                    x: cell_area.x,
+                    y: cell_area.y,
+                    width: 1.min(cell_area.width),
+                    height: 1.min(cell_area.height),
+                };
+
+                // Create a simple block with a character to indicate selection
+                let indicator = Paragraph::new("▶")
+                    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+                f.render_widget(indicator, indicator_area);
             }
         }
     }
