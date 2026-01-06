@@ -101,6 +101,25 @@ impl TuiBrowser {
         Ok(())
     }
 
+    /// Preload images in the current view to reduce flickering
+    fn preload_visible_images(&mut self) {
+        let items_per_page = (self.grid_cols as usize * self.grid_rows as usize);
+        let start_idx = self.scroll_offset;
+        let end_idx = std::cmp::min(start_idx + items_per_page, self.items.len());
+
+        // Collect paths to avoid borrowing issues
+        let paths_to_load: Vec<String> = self.items[start_idx..end_idx]
+            .iter()
+            .map(|s| s.clone())
+            .collect();
+
+        for path in paths_to_load {
+            if let Err(_) = self.load_image_to_cache(&path) {
+                // If loading fails, continue with other images
+            }
+        }
+    }
+
     /// Get a cached image protocol, loading it if necessary
     fn get_cached_image(&mut self, path: &str) -> Option<&mut StatefulProtocol> {
         // Try to load if not in cache
@@ -203,9 +222,11 @@ fn run_app(
         if let Event::Key(key) = event::read()? {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Char('j') | KeyCode::Down => app.next(),
-                KeyCode::Char('k') | KeyCode::Up => app.previous(),
-                KeyCode::Char('h') | KeyCode::Left => { // Move left in grid
+                KeyCode::Char('j') => app.next(),
+                KeyCode::Down => app.next(),
+                KeyCode::Char('k') => app.previous(),
+                KeyCode::Up => app.previous(),
+                KeyCode::Char('h') => { // Move left in grid
                     if let Some(selected) = app.state.selected() {
                         if selected > 0 {
                             app.state.select(Some(selected - 1));
@@ -214,7 +235,26 @@ fn run_app(
                         }
                     }
                 }
-                KeyCode::Char('l') | KeyCode::Right => { // Move right in grid
+                KeyCode::Left => { // Move left in grid
+                    if let Some(selected) = app.state.selected() {
+                        if selected > 0 {
+                            app.state.select(Some(selected - 1));
+                            app.update_selected_image();
+                            app.ensure_selection_visible();
+                        }
+                    }
+                }
+                KeyCode::Char('l') => { // Move right in grid
+                    if let Some(selected) = app.state.selected() {
+                        let next_idx = selected + 1;
+                        if next_idx < app.items.len() {
+                            app.state.select(Some(next_idx));
+                            app.update_selected_image();
+                            app.ensure_selection_visible();
+                        }
+                    }
+                }
+                KeyCode::Right => { // Move right in grid
                     if let Some(selected) = app.state.selected() {
                         let next_idx = selected + 1;
                         if next_idx < app.items.len() {
@@ -319,6 +359,9 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
 }
 
 fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
+    // Preload visible images to reduce flickering
+    app.preload_visible_images();
+
     // Set fixed grid dimensions: 5 columns and 4 rows (as requested, removing filename display allows 4 rows)
     app.grid_cols = 5;
     let max_rows = 4; // Maximum 4 rows as requested
@@ -358,13 +401,7 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
             cell_area.height -= 1;
         }
 
-        // Try to load the image if not already cached
-        if let Err(_) = app.load_image_to_cache(item_path) {
-            // If loading fails, skip this image
-            continue;
-        }
-
-        // Get the cached image protocol for this path
+        // Get the cached image protocol for this path (should already be loaded)
         if let Some(image_protocol) = app.get_cached_image(item_path) {
             // Create the image widget with fit mode to scale images to fit the cell
             let image_widget = StatefulImage::new();
