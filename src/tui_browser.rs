@@ -354,6 +354,9 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
 
     let items_to_render: Vec<_> = app.items[start_idx..end_idx].to_vec();
 
+    let clear_block = Paragraph::new("").style(Style::default().bg(Color::Black));
+    f.render_widget(clear_block, area);
+
     for (i, item_path) in items_to_render.iter().enumerate() {
         let row = (i / app.grid_cols as usize) as u16;
         let col = (i % app.grid_cols as usize) as u16;
@@ -427,8 +430,6 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
                     },
                 };
 
-                let clear_block = Paragraph::new("").style(Style::default().bg(Color::Black));
-                f.render_widget(clear_block, image_area);
                 f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
             }
         }
