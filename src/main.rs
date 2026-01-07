@@ -166,6 +166,10 @@ fn main() -> Result<()> {
         orientation: args.orientation.and_then(|s| parse_orientation(&s).ok()),
     };
 
+    // Skip terminal auto-detection for TUI mode - it's not needed and can cause input issues
+    // Set environment variable to skip terminal queries
+    std::env::set_var("LSIX_SKIP_QUERIES", "1");
+    
     // Auto-detect terminal capabilities (very fast now)
     let _term_config = terminal::autodetect().context("Terminal auto-detection failed")?;
 

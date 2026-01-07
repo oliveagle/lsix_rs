@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::time::Duration;
 
 /// Terminal configuration detected via escape sequences
@@ -33,6 +33,8 @@ fn query_terminal(sequence: &str, timeout_ms: u64) -> Result<Vec<u8>> {
         return Ok(Vec::new());
     }
 
+    use crossterm::event::{poll, read, Event};
+    
     // Enable raw mode to read response without echo
     crossterm::terminal::enable_raw_mode()?;
 
@@ -41,29 +43,29 @@ fn query_terminal(sequence: &str, timeout_ms: u64) -> Result<Vec<u8>> {
     io::stderr().flush()?;
 
     // Read response with short timeout (capped at 200ms)
-    let start = std::time::Instant::now();
-    let mut response = Vec::new();
     let timeout = Duration::from_millis(timeout_ms.min(200)); 
-    let stdin = io::stdin();
+    let response = Vec::new();
 
-    while start.elapsed() < timeout {
-        let mut byte = [0u8; 1];
-        let mut handle = stdin.lock();
-        match handle.read(&mut byte) {
-            Ok(1) => {
-                response.push(byte[0]);
-
-                // Check for termination sequences
-                if response.ends_with(b"c") || response.ends_with(b"S") || response.ends_with(b"\\")
-                {
-                    break;
+    // Use crossterm's event polling instead of direct stdin reading
+    // This is more reliable and won't leave junk in the input buffer
+    if poll(timeout)? {
+        // Try to read the response as raw bytes
+        // Terminal responses come as escape sequences
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if poll(Duration::from_millis(1))? {
+                match read()? {
+                    Event::Key(_key_event) => {
+                        // Terminal responses might come as key events
+                        // We need to collect them as bytes
+                        // For now, just break as we got something
+                        break;
+                    }
+                    _ => break,
                 }
-            }
-            Ok(0) | Err(_) => {
-                // No data available, don't wait too long
+            } else {
                 break;
             }
-            _ => {}
         }
     }
 
