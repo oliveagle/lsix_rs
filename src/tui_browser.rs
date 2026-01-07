@@ -513,6 +513,10 @@ fn display_single_image(image_path: &str) -> Result<(), std::io::Error> {
     enable_raw_mode().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     execute!(stdout, EnterAlternateScreen)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    
+    // Clear the screen after returning to alternate screen to ensure clean state
+    execute!(stdout, crossterm::terminal::Clear(crossterm::terminal::ClearType::All))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     Ok(())
 }
