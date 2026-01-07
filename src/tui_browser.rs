@@ -570,20 +570,49 @@ fn render_fullscreen_image(f: &mut Frame, app: &mut TuiBrowser) {
                 trace_log(&format!("Final image size: {}x{}", resized_image.width(), resized_image.height()));
                 
                 // Use new_resize_protocol which handles resizing automatically
-                let mut image_protocol = picker.new_resize_protocol(resized_image);
+                let mut image_protocol = picker.new_resize_protocol(resized_image.clone());
                 
-                // Use Resize::Fit to maintain aspect ratio
+                // Use Resize::Fit to maintain aspect ratio and Center it
                 let image_widget = StatefulImage::new().resize(Resize::Fit(None));
                 
-                // Use almost the full screen (leave 1 line for status)
+                // Calculate centering for the image_area
+                // Get the potential pixel size of the display area
+                let display_width_pixels = (full_area.width as u32) * (font_size.0 as u32);
+                let display_height_pixels = (display_height as u32) * (font_size.1 as u32);
+                
+                // Calculate how many pixels the image will actually take while fitting
+                let img_aspect = (resized_image.width() as f32) / (resized_image.height() as f32);
+                let area_aspect = (display_width_pixels as f32) / (display_height_pixels as f32);
+                
+                let (final_cell_width, final_cell_height) = if img_aspect > area_aspect {
+                    // Limited by width
+                    let w = full_area.width;
+                    let h = ((w as f32 * (font_size.0 as f32) / img_aspect) / (font_size.1 as f32)) as u16;
+                    (w, h.min(display_height))
+                } else {
+                    // Limited by height
+                    let h = display_height;
+                    let w = ((h as f32 * (font_size.1 as f32) * img_aspect) / (font_size.0 as f32)) as u16;
+                    (w.min(full_area.width), h)
+                };
+
+                let x_offset = full_area.width.saturating_sub(final_cell_width) / 2;
+                let y_offset = display_height.saturating_sub(final_cell_height) / 2;
+
                 let image_area = Rect {
-                    x: 0,
-                    y: 0,
-                    width: full_area.width,
-                    height: display_height,
+                    x: full_area.x + x_offset,
+                    y: full_area.y + y_offset,
+                    width: final_cell_width,
+                    height: final_cell_height,
                 };
                 
-                trace_log(&format!("Rendering image to area: {:?}", image_area));
+                trace_log(&format!(
+                    "Rendering centered image:\n\
+                    - final_cells: {}x{}\n\
+                    - offsets: {},{}\n\
+                    - image_area: {:?}", 
+                    final_cell_width, final_cell_height, x_offset, y_offset, image_area
+                ));
                 
                 f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
                 
