@@ -41,6 +41,7 @@ pub struct TuiBrowser {
     pub scroll_offset: usize,
     pub image_cache: HashMap<String, image::DynamicImage>,
     pub picker: Option<Picker>,
+    pub fullscreen_mode: bool, // Whether we're in fullscreen image view mode
 }
 
 impl TuiBrowser {
@@ -59,6 +60,7 @@ impl TuiBrowser {
             scroll_offset: 0,
             image_cache: HashMap::new(),
             picker: None, // Will be initialized later
+            fullscreen_mode: false,
         }
     }
 
@@ -182,8 +184,31 @@ fn run_app(
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('q') => {
+                        if app.fullscreen_mode {
+                            // Exit fullscreen mode
+                            app.fullscreen_mode = false;
+                            terminal.draw(|f| ui(f, app))?;
+                        } else {
+                            // Exit application
+                            return Ok(());
+                        }
+                    }
+                    KeyCode::Esc => {
+                        if app.fullscreen_mode {
+                            // Exit fullscreen mode
+                            app.fullscreen_mode = false;
+                            terminal.draw(|f| ui(f, app))?;
+                        } else {
+                            // Exit application
+                            return Ok(());
+                        }
+                    }
                     KeyCode::Down => {
+                        if app.fullscreen_mode {
+                            // In fullscreen mode, ignore navigation
+                            continue;
+                        }
                         if let Some(selected) = app.state.selected() {
                             let row = selected / app.grid_cols as usize;
                             let col = selected % app.grid_cols as usize;
@@ -306,10 +331,8 @@ fn run_app(
                         terminal.draw(|f| ui(f, app))?;
                     }
                     KeyCode::Enter => {
-                        // Display the selected image in full size
-                        if let Some(image_path) = &app.selected_image {
-                            display_single_image(image_path)?;
-                        }
+                        // Toggle fullscreen mode
+                        app.fullscreen_mode = !app.fullscreen_mode;
                         terminal.draw(|f| ui(f, app))?;
                     }
                     _ => {}
@@ -320,6 +343,12 @@ fn run_app(
 }
 
 fn ui(f: &mut Frame, app: &mut TuiBrowser) {
+    // Check if we're in fullscreen mode
+    if app.fullscreen_mode {
+        render_fullscreen_image(f, app);
+        return;
+    }
+    
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -363,6 +392,84 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
     let status_bar = Paragraph::new(Text::from(Span::raw(status_text)))
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(status_bar, chunks[2]);
+}
+
+fn render_fullscreen_image(f: &mut Frame, app: &mut TuiBrowser) {
+    // Get the selected image
+    if let Some(ref image_path) = app.selected_image {
+        let filename = Path::new(image_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| image_path.clone());
+        
+        let current_pos = app.state.selected().unwrap_or(0) + 1;
+        
+        // Create layout with header and image area
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Image area
+                Constraint::Length(3), // Footer
+            ])
+            .split(f.area());
+        
+        // Header
+        let header_block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!("Fullscreen View - {}", filename));
+        f.render_widget(header_block, chunks[0]);
+        
+        // Try to load and display the image
+        if !app.image_cache.contains_key(image_path) {
+            match ImageReader::open(image_path) {
+                Ok(reader) => match reader.decode() {
+                    Ok(img) => {
+                        app.image_cache.insert(image_path.to_string(), img);
+                    }
+                    Err(_) => {
+                        let error_text = Paragraph::new("Error: Failed to decode image")
+                            .block(Block::default().borders(Borders::ALL));
+                        f.render_widget(error_text, chunks[1]);
+                        return;
+                    }
+                },
+                Err(_) => {
+                    let error_text = Paragraph::new("Error: Failed to open image")
+                        .block(Block::default().borders(Borders::ALL));
+                    f.render_widget(error_text, chunks[1]);
+                    return;
+                }
+            }
+        }
+        
+        if let Some(image_data) = app.image_cache.get(image_path) {
+            if let Some(ref picker) = app.picker {
+                let mut image_protocol = picker.new_resize_protocol(image_data.clone());
+                let image_widget = StatefulImage::new();
+                
+                // Use the full image area with some padding
+                let image_area = Rect {
+                    x: chunks[1].x + 2,
+                    y: chunks[1].y + 1,
+                    width: chunks[1].width.saturating_sub(4),
+                    height: chunks[1].height.saturating_sub(2),
+                };
+                
+                f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
+            }
+        }
+        
+        // Footer
+        let footer_text = format!(
+            "q/ESC: Back to Grid | {}/{}",
+            current_pos,
+            app.items.len()
+        );
+        let footer_bar = Paragraph::new(Text::from(Span::raw(footer_text)))
+            .block(Block::default().borders(Borders::ALL));
+        f.render_widget(footer_bar, chunks[2]);
+    }
 }
 
 fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
@@ -497,26 +604,3 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
     f.render_widget(grid_block, area);
 }
 
-fn display_single_image(image_path: &str) -> Result<(), std::io::Error> {
-    use crossterm::execute;
-    use std::io::stdout;
-
-    disable_raw_mode().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    let mut stdout = stdout();
-    execute!(stdout, LeaveAlternateScreen)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    if let Err(e) = crate::term_image::display_single_image_interactive(image_path) {
-        eprintln!("Error displaying image: {}", e);
-    }
-
-    enable_raw_mode().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    execute!(stdout, EnterAlternateScreen)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    
-    // Clear the screen after returning to alternate screen to ensure clean state
-    execute!(stdout, crossterm::terminal::Clear(crossterm::terminal::ClearType::All))
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-    Ok(())
-}

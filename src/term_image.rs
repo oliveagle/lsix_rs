@@ -138,6 +138,7 @@ pub fn render_image_grid(image_paths: &[String], num_columns: u32) -> Result<()>
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn display_single_image_interactive(image_path: &str) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
