@@ -404,21 +404,8 @@ fn render_fullscreen_image(f: &mut Frame, app: &mut TuiBrowser) {
         
         let current_pos = app.state.selected().unwrap_or(0) + 1;
         
-        // Create layout with header and image area
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3), // Header
-                Constraint::Min(0),    // Image area
-                Constraint::Length(3), // Footer
-            ])
-            .split(f.area());
-        
-        // Header
-        let header_block = Block::default()
-            .borders(Borders::ALL)
-            .title(format!("Fullscreen View - {}", filename));
-        f.render_widget(header_block, chunks[0]);
+        // Use the entire screen for image, overlay status text
+        let full_area = f.area();
         
         // Try to load and display the image
         if !app.image_cache.contains_key(image_path) {
@@ -430,14 +417,14 @@ fn render_fullscreen_image(f: &mut Frame, app: &mut TuiBrowser) {
                     Err(_) => {
                         let error_text = Paragraph::new("Error: Failed to decode image")
                             .block(Block::default().borders(Borders::ALL));
-                        f.render_widget(error_text, chunks[1]);
+                        f.render_widget(error_text, full_area);
                         return;
                     }
                 },
                 Err(_) => {
                     let error_text = Paragraph::new("Error: Failed to open image")
                         .block(Block::default().borders(Borders::ALL));
-                    f.render_widget(error_text, chunks[1]);
+                    f.render_widget(error_text, full_area);
                     return;
                 }
             }
@@ -446,29 +433,38 @@ fn render_fullscreen_image(f: &mut Frame, app: &mut TuiBrowser) {
         if let Some(image_data) = app.image_cache.get(image_path) {
             if let Some(ref picker) = app.picker {
                 let mut image_protocol = picker.new_resize_protocol(image_data.clone());
+                // Don't use .resize() - let the protocol handle it
                 let image_widget = StatefulImage::new();
                 
-                // Use the full image area with some padding
+                // Use almost the full screen (leave 1 line for status)
                 let image_area = Rect {
-                    x: chunks[1].x + 2,
-                    y: chunks[1].y + 1,
-                    width: chunks[1].width.saturating_sub(4),
-                    height: chunks[1].height.saturating_sub(2),
+                    x: 0,
+                    y: 0,
+                    width: full_area.width,
+                    height: full_area.height.saturating_sub(1),
                 };
                 
                 f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
             }
         }
         
-        // Footer
-        let footer_text = format!(
-            "q/ESC: Back to Grid | {}/{}",
+        // Render status bar at the bottom (overlay)
+        let status_area = Rect {
+            x: 0,
+            y: full_area.height.saturating_sub(1),
+            width: full_area.width,
+            height: 1,
+        };
+        
+        let status_text = format!(
+            "{} | q/ESC: Back | {}/{}",
+            filename,
             current_pos,
             app.items.len()
         );
-        let footer_bar = Paragraph::new(Text::from(Span::raw(footer_text)))
-            .block(Block::default().borders(Borders::ALL));
-        f.render_widget(footer_bar, chunks[2]);
+        let status_bar = Paragraph::new(Text::from(Span::raw(status_text)))
+            .style(Style::default().bg(Color::Black).fg(Color::White));
+        f.render_widget(status_bar, status_area);
     }
 }
 
