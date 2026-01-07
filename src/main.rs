@@ -134,6 +134,10 @@ struct Args {
     /// Start TUI browser mode for image navigation
     #[arg(long)]
     tui: bool,
+
+    /// Enable detailed logging to file (logs rendering and input events)
+    #[arg(long)]
+    log: bool,
 }
 
 /// Cleanup handler to stop SIXEL and reset terminal
@@ -297,6 +301,13 @@ fn main() -> Result<()> {
     eprintln!("Found {} images to browse.", image_paths.len());
     eprintln!("Build time: {}", BUILD_TIME.trim());
     eprintln!("Use Arrow keys to navigate, Enter to view full size, q to quit");
+
+    // Enable logging if requested
+    if args.log {
+        std::env::set_var("LSIX_ENABLE_LOG", "1");
+        let log_path = "/tmp/lsix_tui.log";
+        eprintln!("Logging enabled - logs will be saved to: {}", log_path);
+    }
 
     // Run the TUI browser
     if let Err(e) = tui_browser::run_tui_browser(image_paths) {

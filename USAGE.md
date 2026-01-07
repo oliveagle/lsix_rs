@@ -20,6 +20,84 @@ cargo build --release
 
 # 递归显示目录
 ./target/release/lsix /path/to/images/
+
+# 启用详细日志（记录渲染和交互细节）
+./target/release/lsix --log
+```
+
+## 日志功能
+
+### 使用 `--log` 标志
+
+当使用 `--log` 标志时，程序会将详细的渲染和交互数据记录到 `/tmp/lsix_tui.log` 文件中。
+
+```bash
+# 启用日志
+./target/release/lsix --log
+
+# 在另一个终端查看实时日志
+tail -f /tmp/lsix_tui.log
+```
+
+### 日志内容
+
+日志文件包含以下信息：
+
+1. **初始化信息**
+   - 启动时间
+   - 图像总数
+   - 终端尺寸
+
+2. **Enter 键事件**（切换全屏模式时）
+   - 当前状态（是否全屏）
+   - 选中的图像索引和文件名
+   - 终端大小
+   - 网格配置（列数、行数）
+   - 滚动偏移量
+
+3. **全屏渲染细节**
+   - 图像路径和文件名
+   - 图像是否在缓存中
+   - 图像尺寸和颜色类型
+   - 显示区域尺寸
+   - 渲染状态
+
+4. **网格渲染细节**
+   - 网格配置（行数、列数）
+   - 每个单元格的位置和尺寸
+   - 渲染的图像数量
+
+### 示例日志输出
+
+```
+[20:30:45.123] === ENTER KEY PRESSED ===
+Current state:
+- fullscreen_mode: false
+- selected_index: Some(2)
+- selected_image: Some("image_003.png")
+- terminal_size: Ok(Size { width: 200, height: 50 })
+- grid_cols: 5, grid_rows: 3
+- scroll_offset: 0
+- total_items: 15
+
+[20:30:45.124] Toggling fullscreen mode: false -> true
+[20:30:45.125] Entering fullscreen mode - rendering fullscreen image
+
+[20:30:45.126] === RENDER_FULLSCREEN_IMAGE START ===
+Fullscreen render:
+- image_path: /path/to/image_003.png
+- filename: image_003.png
+- position: 3/15
+- frame_area: Rect { x: 0, y: 0, width: 200, height: 50 }
+
+[20:30:45.127] Image already in cache
+[20:30:45.128] Creating image protocol:
+- original_size: 1920x1080
+- display_area: 200x49
+
+[20:30:45.129] Rendering image to area: Rect { x: 0, y: 0, width: 200, height: 49 }
+[20:30:45.130] Image rendered successfully
+[20:30:45.131] === RENDER_FULLSCREEN_IMAGE END ===
 ```
 
 ## 并发处理说明

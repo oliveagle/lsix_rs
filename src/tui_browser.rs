@@ -16,19 +16,27 @@ use std::io::{self, stdout, Write};
 
 use std::path::Path;
 
+fn is_logging_enabled() -> bool {
+    std::env::var("LSIX_ENABLE_LOG").is_ok()
+}
+
 fn trace_log(msg: &str) {
+    if !is_logging_enabled() {
+        return;
+    }
+    
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("/tmp/lsix_tui_trace.log")
+        .open("/tmp/lsix_tui.log")
     {
         let timestamp = chrono::Local::now().format("%H:%M:%S%.3f");
         writeln!(file, "[{}] {}", timestamp, msg).ok();
     }
 }
 
-use image::ImageReader;
-use ratatui_image::{picker::Picker, StatefulImage};
+use image::{imageops::FilterType, ImageReader};
+use ratatui_image::{picker::Picker, Resize, StatefulImage};
 use std::collections::HashMap;
 
 pub struct TuiBrowser {
@@ -127,11 +135,29 @@ impl TuiBrowser {
 
 // Main function to run the TUI browser
 pub fn run_tui_browser(image_paths: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize log file if logging is enabled
+    if is_logging_enabled() {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open("/tmp/lsix_tui.log")
+        {
+            writeln!(file, "=== LSIX TUI Browser Log ===").ok();
+            writeln!(file, "Start time: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")).ok();
+            writeln!(file, "Total images: {}\n", image_paths.len()).ok();
+        }
+    }
+    
+    trace_log("Starting TUI browser initialization");
+    
     // Clear any pending input events before starting TUI
     // This prevents issues from terminal queries done before TUI initialization
     while event::poll(std::time::Duration::from_millis(0))? {
         event::read()?; // Consume and discard any pending events
     }
+    
+    trace_log("Terminal setup: enabling raw mode");
     
     // Setup terminal
     enable_raw_mode()?;
@@ -139,6 +165,8 @@ pub fn run_tui_browser(image_paths: Vec<String>) -> Result<(), Box<dyn std::erro
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+
+    trace_log(&format!("Terminal initialized: size = {:?}", terminal.size()));
 
     // Create app state
     let current_dir = std::env::current_dir()
@@ -148,12 +176,18 @@ pub fn run_tui_browser(image_paths: Vec<String>) -> Result<(), Box<dyn std::erro
 
     let mut app = TuiBrowser::new(image_paths, current_dir);
     
+    trace_log("Initializing image picker");
+    
     // Initialize the picker AFTER raw mode is enabled and terminal is setup
     // This should prevent blocking on terminal queries
     app.picker = Some(crate::term_image::create_picker());
 
+    trace_log("Starting main event loop");
+
     // Run the main loop
     let res = run_app(&mut terminal, &mut app);
+
+    trace_log("Exiting TUI browser, restoring terminal");
 
     // Restore terminal
     disable_raw_mode()?;
@@ -167,6 +201,8 @@ pub fn run_tui_browser(image_paths: Vec<String>) -> Result<(), Box<dyn std::erro
     if let Err(err) = res {
         println!("Error: {}", err);
     }
+
+    trace_log("TUI browser shutdown complete");
 
     Ok(())
 }
@@ -331,9 +367,44 @@ fn run_app(
                         terminal.draw(|f| ui(f, app))?;
                     }
                     KeyCode::Enter => {
+                        trace_log(&format!(
+                            "=== ENTER KEY PRESSED ===\n\
+                            Current state:\n\
+                            - fullscreen_mode: {}\n\
+                            - selected_index: {:?}\n\
+                            - selected_image: {:?}\n\
+                            - terminal_size: {:?}\n\
+                            - grid_cols: {}, grid_rows: {}\n\
+                            - scroll_offset: {}\n\
+                            - total_items: {}",
+                            app.fullscreen_mode,
+                            app.state.selected(),
+                            app.selected_image.as_ref().and_then(|p| Path::new(p).file_name().map(|n| n.to_string_lossy().to_string())),
+                            terminal.size(),
+                            app.grid_cols,
+                            app.grid_rows,
+                            app.scroll_offset,
+                            app.items.len()
+                        ));
+                        
                         // Toggle fullscreen mode
                         app.fullscreen_mode = !app.fullscreen_mode;
+                        
+                        trace_log(&format!(
+                            "Toggling fullscreen mode: {} -> {}",
+                            !app.fullscreen_mode,
+                            app.fullscreen_mode
+                        ));
+                        
+                        if app.fullscreen_mode {
+                            trace_log("Entering fullscreen mode - rendering fullscreen image");
+                        } else {
+                            trace_log("Exiting fullscreen mode - returning to grid view");
+                        }
+                        
                         terminal.draw(|f| ui(f, app))?;
+                        
+                        trace_log("=== ENTER KEY HANDLED ===\n");
                     }
                     _ => {}
                 }
@@ -395,6 +466,8 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
 }
 
 fn render_fullscreen_image(f: &mut Frame, app: &mut TuiBrowser) {
+    trace_log("=== RENDER_FULLSCREEN_IMAGE START ===");
+    
     // Get the selected image
     if let Some(ref image_path) = app.selected_image {
         let filename = Path::new(image_path)
@@ -404,47 +477,119 @@ fn render_fullscreen_image(f: &mut Frame, app: &mut TuiBrowser) {
         
         let current_pos = app.state.selected().unwrap_or(0) + 1;
         
+        trace_log(&format!(
+            "Fullscreen render:\n\
+            - image_path: {}\n\
+            - filename: {}\n\
+            - position: {}/{}\n\
+            - frame_area: {:?}",
+            image_path, filename, current_pos, app.items.len(), f.area()
+        ));
+        
         // Use the entire screen for image, overlay status text
         let full_area = f.area();
         
         // Try to load and display the image
         if !app.image_cache.contains_key(image_path) {
+            trace_log(&format!("Image not in cache, loading: {}", image_path));
+            
             match ImageReader::open(image_path) {
                 Ok(reader) => match reader.decode() {
                     Ok(img) => {
+                        trace_log(&format!(
+                            "Image loaded successfully:\n\
+                            - dimensions: {}x{}\n\
+                            - color_type: {:?}",
+                            img.width(), img.height(), img.color()
+                        ));
                         app.image_cache.insert(image_path.to_string(), img);
                     }
-                    Err(_) => {
+                    Err(e) => {
+                        trace_log(&format!("Failed to decode image: {}", e));
                         let error_text = Paragraph::new("Error: Failed to decode image")
                             .block(Block::default().borders(Borders::ALL));
                         f.render_widget(error_text, full_area);
+                        trace_log("=== RENDER_FULLSCREEN_IMAGE END (decode error) ===\n");
                         return;
                     }
                 },
-                Err(_) => {
+                Err(e) => {
+                    trace_log(&format!("Failed to open image: {}", e));
                     let error_text = Paragraph::new("Error: Failed to open image")
                         .block(Block::default().borders(Borders::ALL));
                     f.render_widget(error_text, full_area);
+                    trace_log("=== RENDER_FULLSCREEN_IMAGE END (open error) ===\n");
                     return;
                 }
             }
+        } else {
+            trace_log("Image already in cache");
         }
         
         if let Some(image_data) = app.image_cache.get(image_path) {
             if let Some(ref picker) = app.picker {
-                let mut image_protocol = picker.new_resize_protocol(image_data.clone());
-                // Don't use .resize() - let the protocol handle it
-                let image_widget = StatefulImage::new();
+                // Calculate pixel dimensions for better quality
+                let font_size = picker.font_size();
+                let display_height = full_area.height.saturating_sub(1);
+                
+                // Calculate target pixel size based on terminal area and font size
+                let target_pixel_width = (full_area.width as u32) * (font_size.0 as u32);
+                let target_pixel_height = (display_height as u32) * (font_size.1 as u32);
+                
+                trace_log(&format!(
+                    "Creating image protocol:\n\
+                    - original_size: {}x{}\n\
+                    - display_area (cells): {}x{}\n\
+                    - font_size: {:?}\n\
+                    - target_pixels: {}x{}",
+                    image_data.width(), image_data.height(),
+                    full_area.width, display_height,
+                    font_size,
+                    target_pixel_width, target_pixel_height
+                ));
+                
+                // Resize image to fit within 1920x1920 while maintaining aspect ratio
+                let max_dimension = 1920;
+                let (img_width, img_height) = (image_data.width(), image_data.height());
+                
+                let resized_image = {
+                    // Calculate the scaling factor to fit within max_dimension
+                    let scale = (max_dimension as f32) / img_width.max(img_height) as f32;
+                    let new_width = (img_width as f32 * scale) as u32;
+                    let new_height = (img_height as f32 * scale) as u32;
+                    
+                    trace_log(&format!(
+                        "Resizing image: {}x{} -> {}x{} (scale: {:.2})",
+                        img_width, img_height, new_width, new_height, scale
+                    ));
+                    
+                    // Use Lanczos3 filter for high-quality downscaling
+                    image_data.resize(new_width, new_height, FilterType::Lanczos3)
+                };
+                
+                trace_log(&format!("Final image size: {}x{}", resized_image.width(), resized_image.height()));
+                
+                // Use new_resize_protocol which handles resizing automatically
+                let mut image_protocol = picker.new_resize_protocol(resized_image);
+                
+                // Use Resize::Fit to maintain aspect ratio
+                let image_widget = StatefulImage::new().resize(Resize::Fit(None));
                 
                 // Use almost the full screen (leave 1 line for status)
                 let image_area = Rect {
                     x: 0,
                     y: 0,
                     width: full_area.width,
-                    height: full_area.height.saturating_sub(1),
+                    height: display_height,
                 };
                 
+                trace_log(&format!("Rendering image to area: {:?}", image_area));
+                
                 f.render_stateful_widget(image_widget, image_area, &mut image_protocol);
+                
+                trace_log("Image rendered successfully");
+            } else {
+                trace_log("ERROR: picker is None!");
             }
         }
         
@@ -462,10 +607,17 @@ fn render_fullscreen_image(f: &mut Frame, app: &mut TuiBrowser) {
             current_pos,
             app.items.len()
         );
+        
+        trace_log(&format!("Rendering status bar: '{}' at {:?}", status_text, status_area));
+        
         let status_bar = Paragraph::new(Text::from(Span::raw(status_text)))
             .style(Style::default().bg(Color::Black).fg(Color::White));
         f.render_widget(status_bar, status_area);
+    } else {
+        trace_log("No image selected for fullscreen view");
     }
+    
+    trace_log("=== RENDER_FULLSCREEN_IMAGE END ===\n");
 }
 
 fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
