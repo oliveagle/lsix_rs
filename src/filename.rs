@@ -6,6 +6,7 @@ pub enum FilenameMode {
 
 /// Process a filename for display in ImageMagick labels
 /// This replicates the processlabel function from the original bash script
+#[allow(dead_code)]
 pub fn process_label(filename: &str) -> String {
     process_label_with_mode(filename, FilenameMode::Short)
 }

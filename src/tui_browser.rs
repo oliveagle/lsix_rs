@@ -48,15 +48,7 @@ impl TuiBrowser {
         let mut state = ListState::default();
         state.select(Some(0));
 
-        // Initialize the picker for image protocols
-        let picker = match Picker::from_query_stdio() {
-            Ok(picker) => Some(picker),
-            Err(_) => {
-                // Fallback to halfblocks if terminal query fails
-                Some(Picker::halfblocks())
-            }
-        };
-
+        // Don't initialize the picker here - do it after raw mode is enabled
         TuiBrowser {
             items,
             state,
@@ -66,10 +58,11 @@ impl TuiBrowser {
             grid_rows: 0,
             scroll_offset: 0,
             image_cache: HashMap::new(),
-            picker,
+            picker: None, // Will be initialized later
         }
     }
 
+    #[allow(dead_code)]
     pub fn next(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
@@ -86,6 +79,7 @@ impl TuiBrowser {
         self.ensure_selection_visible();
     }
 
+    #[allow(dead_code)]
     pub fn previous(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
@@ -105,7 +99,7 @@ impl TuiBrowser {
     /// Ensure the selected item is visible in the current view
     fn ensure_selection_visible(&mut self) {
         if let Some(selected_idx) = self.state.selected() {
-            let items_per_page = (self.grid_cols as usize * self.grid_rows as usize);
+            let items_per_page = self.grid_cols as usize * self.grid_rows as usize;
 
             // Calculate which page the selected item is on
             let selected_page = selected_idx / items_per_page;
@@ -131,6 +125,12 @@ impl TuiBrowser {
 
 // Main function to run the TUI browser
 pub fn run_tui_browser(image_paths: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    // Clear any pending input events before starting TUI
+    // This prevents issues from terminal queries done before TUI initialization
+    while event::poll(std::time::Duration::from_millis(0))? {
+        event::read()?; // Consume and discard any pending events
+    }
+    
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -145,6 +145,10 @@ pub fn run_tui_browser(image_paths: Vec<String>) -> Result<(), Box<dyn std::erro
         .to_string();
 
     let mut app = TuiBrowser::new(image_paths, current_dir);
+    
+    // Initialize the picker AFTER raw mode is enabled and terminal is setup
+    // This should prevent blocking on terminal queries
+    app.picker = Some(crate::term_image::create_picker());
 
     // Run the main loop
     let res = run_app(&mut terminal, &mut app);
@@ -169,131 +173,147 @@ fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut TuiBrowser,
 ) -> io::Result<()> {
+    // First draw to show the UI immediately
+    terminal.draw(|f| ui(f, app))?;
+    
     loop {
-        terminal.draw(|f| ui(f, app))?;
+        // Use poll to check if there's an event available with a timeout
+        // This allows the UI to update even if no key is pressed
+        if event::poll(std::time::Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Down => {
+                        if let Some(selected) = app.state.selected() {
+                            let row = selected / app.grid_cols as usize;
+                            let col = selected % app.grid_cols as usize;
+                            let next_row = row + 1;
+                            let next_idx = next_row * app.grid_cols as usize + col;
 
-        if let Event::Key(key) = event::read()? {
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Down => {
-                    if let Some(selected) = app.state.selected() {
-                        let row = selected / app.grid_cols as usize;
-                        let col = selected % app.grid_cols as usize;
-                        let next_row = row + 1;
-                        let next_idx = next_row * app.grid_cols as usize + col;
-
-                        if next_idx < app.items.len() {
-                            app.state.select(Some(next_idx));
-                            app.update_selected_image();
-                            app.ensure_selection_visible();
-                        } else {
-                            // If we're at the bottom row, wrap to top
-                            let top_idx = col;
-                            if top_idx < app.items.len() {
-                                app.state.select(Some(top_idx));
+                            if next_idx < app.items.len() {
+                                app.state.select(Some(next_idx));
                                 app.update_selected_image();
                                 app.ensure_selection_visible();
-                            }
-                        }
-                    }
-                }
-                KeyCode::Up => {
-                    if let Some(selected) = app.state.selected() {
-                        let row = selected / app.grid_cols as usize;
-                        let col = selected % app.grid_cols as usize;
-
-                        if row > 0 {
-                            // Move up to the same column in the previous row
-                            let prev_row = row - 1;
-                            let prev_idx = prev_row * app.grid_cols as usize + col;
-
-                            if prev_idx < app.items.len() {
-                                app.state.select(Some(prev_idx));
-                                app.update_selected_image();
-                                app.ensure_selection_visible();
-                            }
-                        } else {
-                            // If we're at the top row, wrap to bottom
-                            let total_rows = (app.items.len() + app.grid_cols as usize - 1)
-                                / app.grid_cols as usize;
-                            if total_rows > 1 {
-                                let bottom_row = total_rows - 1;
-                                let bottom_idx = bottom_row * app.grid_cols as usize + col;
-
-                                if bottom_idx < app.items.len() {
-                                    app.state.select(Some(bottom_idx));
+                            } else {
+                                // If we're at the bottom row, wrap to top
+                                let top_idx = col;
+                                if top_idx < app.items.len() {
+                                    app.state.select(Some(top_idx));
                                     app.update_selected_image();
                                     app.ensure_selection_visible();
                                 }
                             }
                         }
+                        terminal.draw(|f| ui(f, app))?;
                     }
-                }
-                KeyCode::Left => {
-                    // Move left in grid
-                    if let Some(selected) = app.state.selected() {
-                        if selected > 0 {
-                            app.state.select(Some(selected - 1));
-                            app.update_selected_image();
-                            app.ensure_selection_visible();
+                    KeyCode::Up => {
+                        if let Some(selected) = app.state.selected() {
+                            let row = selected / app.grid_cols as usize;
+                            let col = selected % app.grid_cols as usize;
+
+                            if row > 0 {
+                                // Move up to the same column in the previous row
+                                let prev_row = row - 1;
+                                let prev_idx = prev_row * app.grid_cols as usize + col;
+
+                                if prev_idx < app.items.len() {
+                                    app.state.select(Some(prev_idx));
+                                    app.update_selected_image();
+                                    app.ensure_selection_visible();
+                                }
+                            } else {
+                                // If we're at the top row, wrap to bottom
+                                let total_rows = (app.items.len() + app.grid_cols as usize - 1)
+                                    / app.grid_cols as usize;
+                                if total_rows > 1 {
+                                    let bottom_row = total_rows - 1;
+                                    let bottom_idx = bottom_row * app.grid_cols as usize + col;
+
+                                    if bottom_idx < app.items.len() {
+                                        app.state.select(Some(bottom_idx));
+                                        app.update_selected_image();
+                                        app.ensure_selection_visible();
+                                    }
+                                }
+                            }
                         }
+                        terminal.draw(|f| ui(f, app))?;
                     }
-                }
-                KeyCode::Right => {
-                    // Move right in grid
-                    if let Some(selected) = app.state.selected() {
-                        let next_idx = selected + 1;
-                        if next_idx < app.items.len() {
-                            app.state.select(Some(next_idx));
-                            app.update_selected_image();
-                            app.ensure_selection_visible();
+                    KeyCode::Left => {
+                        // Move left in grid
+                        if let Some(selected) = app.state.selected() {
+                            if selected > 0 {
+                                app.state.select(Some(selected - 1));
+                                app.update_selected_image();
+                                app.ensure_selection_visible();
+                            }
                         }
+                        terminal.draw(|f| ui(f, app))?;
                     }
-                }
-                KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    app.state.select(Some(0));
-                    app.update_selected_image();
-                }
-                KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                    app.state.select(Some(app.items.len().saturating_sub(1)));
-                    app.update_selected_image();
-                }
-                KeyCode::PageUp => {
-                    // Move up by one page (grid size)
-                    let items_per_page = (app.grid_cols * app.grid_rows) as usize;
-                    let current = app.state.selected().unwrap_or(0);
-                    let new_index = current.saturating_sub(items_per_page);
-                    app.state.select(Some(new_index));
-                    app.update_selected_image();
-                    app.ensure_selection_visible();
-                }
-                KeyCode::PageDown => {
-                    // Move down by one page (grid size)
-                    let items_per_page = (app.grid_cols * app.grid_rows) as usize;
-                    let current = app.state.selected().unwrap_or(0);
-                    let new_index =
-                        std::cmp::min(current + items_per_page, app.items.len().saturating_sub(1));
-                    app.state.select(Some(new_index));
-                    app.update_selected_image();
-                    app.ensure_selection_visible();
-                }
-                KeyCode::Home => {
-                    app.state.select(Some(0));
-                    app.update_selected_image();
-                }
-                KeyCode::End => {
-                    if !app.items.is_empty() {
-                        app.state.select(Some(app.items.len() - 1));
+                    KeyCode::Right => {
+                        // Move right in grid
+                        if let Some(selected) = app.state.selected() {
+                            let next_idx = selected + 1;
+                            if next_idx < app.items.len() {
+                                app.state.select(Some(next_idx));
+                                app.update_selected_image();
+                                app.ensure_selection_visible();
+                            }
+                        }
+                        terminal.draw(|f| ui(f, app))?;
+                    }
+                    KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.state.select(Some(0));
                         app.update_selected_image();
+                        terminal.draw(|f| ui(f, app))?;
                     }
-                }
-                KeyCode::Enter => {
-                    // Display the selected image in full size
-                    if let Some(image_path) = &app.selected_image {
-                        display_single_image(image_path)?;
+                    KeyCode::Char('G') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                        app.state.select(Some(app.items.len().saturating_sub(1)));
+                        app.update_selected_image();
+                        terminal.draw(|f| ui(f, app))?;
                     }
+                    KeyCode::PageUp => {
+                        // Move up by one page (grid size)
+                        let items_per_page = (app.grid_cols * app.grid_rows) as usize;
+                        let current = app.state.selected().unwrap_or(0);
+                        let new_index = current.saturating_sub(items_per_page);
+                        app.state.select(Some(new_index));
+                        app.update_selected_image();
+                        app.ensure_selection_visible();
+                        terminal.draw(|f| ui(f, app))?;
+                    }
+                    KeyCode::PageDown => {
+                        // Move down by one page (grid size)
+                        let items_per_page = (app.grid_cols * app.grid_rows) as usize;
+                        let current = app.state.selected().unwrap_or(0);
+                        let new_index =
+                            std::cmp::min(current + items_per_page, app.items.len().saturating_sub(1));
+                        app.state.select(Some(new_index));
+                        app.update_selected_image();
+                        app.ensure_selection_visible();
+                        terminal.draw(|f| ui(f, app))?;
+                    }
+                    KeyCode::Home => {
+                        app.state.select(Some(0));
+                        app.update_selected_image();
+                        terminal.draw(|f| ui(f, app))?;
+                    }
+                    KeyCode::End => {
+                        if !app.items.is_empty() {
+                            app.state.select(Some(app.items.len() - 1));
+                            app.update_selected_image();
+                        }
+                        terminal.draw(|f| ui(f, app))?;
+                    }
+                    KeyCode::Enter => {
+                        // Display the selected image in full size
+                        if let Some(image_path) = &app.selected_image {
+                            display_single_image(image_path)?;
+                        }
+                        terminal.draw(|f| ui(f, app))?;
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
         }
     }
@@ -307,7 +327,7 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
             Constraint::Min(0),    // Main content (thumbnails)
             Constraint::Length(3), // Status bar
         ])
-        .split(f.size());
+        .split(f.area());
 
     // Header
     let header_block = Block::default()
@@ -319,7 +339,7 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
     render_thumbnail_grid(f, app, chunks[1]);
 
     // Status bar
-    let selected_filename = if let Some(ref path) = app.selected_image {
+    let _selected_filename = if let Some(ref path) = app.selected_image {
         Path::new(path)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -334,7 +354,7 @@ fn ui(f: &mut Frame, app: &mut TuiBrowser) {
     let total_pages = (app.items.len() + items_per_page - 1) / items_per_page;
 
     let status_text = format!(
-        "q: Quit | hjkl: Nav | Enter: View | PgUp/PgDn: Page | {}/{} | Page {}/{}",
+        "q: Quit | Arrows: Nav | Enter: View | PgUp/PgDn: Page | {}/{} | Page {}/{}",
         current_pos,
         app.items.len(),
         page,
@@ -359,7 +379,7 @@ fn render_thumbnail_grid(f: &mut Frame, app: &mut TuiBrowser, area: Rect) {
     let cell_height = area.height / app.grid_rows;
 
     let start_idx = app.scroll_offset;
-    let items_per_page = (app.grid_cols as usize * app.grid_rows as usize);
+    let items_per_page = app.grid_cols as usize * app.grid_rows as usize;
     let end_idx = std::cmp::min(start_idx + items_per_page, app.items.len());
 
     trace_log(&format!(

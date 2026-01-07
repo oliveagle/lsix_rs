@@ -77,6 +77,7 @@ pub struct ImageConfig {
 impl ImageConfig {
     /// Create a new ImageConfig based on terminal width
     /// Follows the original lsix script logic
+    #[allow(dead_code)]
     pub fn from_terminal_width(width: u32, num_colors: u32, bg: &str, fg: &str) -> Self {
         // Original lsix uses fixed 360px tile size
         // Check for environment variable override
@@ -134,6 +135,7 @@ impl ImageConfig {
 
     /// Create a new ImageConfig for fullscreen image display
     /// Uses the full terminal width for larger image display
+    #[allow(dead_code)]
     pub fn from_terminal_width_fullscreen(width: u32, num_colors: u32, bg: &str, fg: &str) -> Self {
         let tile_width = (width.saturating_sub(100)).max(400);
         let tile_height = tile_width;
@@ -251,6 +253,7 @@ pub struct ImageEntry {
 
 /// Process and display images in chunks, with concurrent loading
 /// Processes multiple rows in parallel for better performance
+#[allow(dead_code)]
 pub fn process_images_concurrent(images: Vec<ImageEntry>, config: &ImageConfig) -> Result<()> {
     use rayon::prelude::*;
 
@@ -276,6 +279,7 @@ pub fn process_images_concurrent(images: Vec<ImageEntry>, config: &ImageConfig) 
 
 /// Process and display images grouped by criteria
 /// Shows group headers and processes each group separately
+#[allow(dead_code)]
 pub fn process_images_grouped(
     groups: Vec<ImageGroup>,
     all_images: Vec<ImageEntry>,
@@ -332,6 +336,7 @@ pub fn process_images_grouped(
 }
 
 /// Generate SIXEL output with caching support
+#[allow(dead_code)]
 fn generate_sixel_output_cached(images: &[ImageEntry], config: &ImageConfig) -> Result<Vec<u8>> {
     // Try to use cache
     if let Ok(cache_dir) = get_cache_dir() {
@@ -361,6 +366,7 @@ fn generate_sixel_output_cached(images: &[ImageEntry], config: &ImageConfig) -> 
 }
 
 /// Generate cache key based on images and config
+#[allow(dead_code)]
 fn generate_cache_key(images: &[ImageEntry], config: &ImageConfig) -> String {
     let mut hasher = DefaultHasher::new();
 
@@ -391,6 +397,7 @@ fn generate_cache_key(images: &[ImageEntry], config: &ImageConfig) -> String {
 }
 
 /// Get cache directory path
+#[allow(dead_code)]
 fn get_cache_dir() -> Result<std::path::PathBuf> {
     let cache_dir = if let Ok(home) = std::env::var("HOME") {
         std::path::PathBuf::from(home).join(".cache").join("lsix")
@@ -407,6 +414,7 @@ fn get_cache_dir() -> Result<std::path::PathBuf> {
 }
 
 /// Check if cached data is valid for the given images
+#[allow(dead_code)]
 fn is_cache_valid(cache_path: &std::path::Path, images: &[ImageEntry]) -> bool {
     if !cache_path.exists() {
         return false;
@@ -435,12 +443,14 @@ fn is_cache_valid(cache_path: &std::path::Path, images: &[ImageEntry]) -> bool {
 }
 
 /// Write to cache
+#[allow(dead_code)]
 fn write_to_cache(cache_path: &std::path::Path, data: &[u8]) -> Result<()> {
     fs::write(cache_path, data)?;
     Ok(())
 }
 
 /// Generate SIXEL output for a chunk of images
+#[allow(dead_code)]
 fn generate_sixel_output(images: &[ImageEntry], config: &ImageConfig) -> Result<Vec<u8>> {
     // Build montage arguments for this row
     let mut montage_args = config.get_montage_options();
@@ -541,6 +551,7 @@ fn generate_sixel_output(images: &[ImageEntry], config: &ImageConfig) -> Result<
 
 /// Pre-load and validate image files concurrently
 /// Returns only valid image entries that match the filter criteria
+#[allow(dead_code)]
 pub fn validate_images_concurrent(
     paths: &[String],
     explicit: bool,

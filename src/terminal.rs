@@ -4,6 +4,7 @@ use std::time::Duration;
 
 /// Terminal configuration detected via escape sequences
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TerminalConfig {
     pub has_sixel: bool,
     pub num_colors: u32,
@@ -32,17 +33,17 @@ fn query_terminal(sequence: &str, timeout_ms: u64) -> Result<Vec<u8>> {
         return Ok(Vec::new());
     }
 
-    // Disable echo
-    let _ = std::process::Command::new("stty").arg("-echo").status();
+    // Enable raw mode to read response without echo
+    crossterm::terminal::enable_raw_mode()?;
 
     // Send the query sequence
     eprint!("{}", sequence);
     io::stderr().flush()?;
 
-    // Read response with very short timeout (50ms max)
+    // Read response with short timeout (capped at 200ms)
     let start = std::time::Instant::now();
     let mut response = Vec::new();
-    let timeout = Duration::from_millis(timeout_ms.min(50)); // Cap at 50ms
+    let timeout = Duration::from_millis(timeout_ms.min(200)); 
     let stdin = io::stdin();
 
     while start.elapsed() < timeout {
@@ -66,8 +67,8 @@ fn query_terminal(sequence: &str, timeout_ms: u64) -> Result<Vec<u8>> {
         }
     }
 
-    // Re-enable echo
-    let _ = std::process::Command::new("stty").arg("echo").status();
+    // Disable raw mode immediately
+    crossterm::terminal::disable_raw_mode()?;
 
     Ok(response)
 }
@@ -77,6 +78,12 @@ pub fn detect_sixel() -> Result<bool> {
     // Check for YAFT terminal (vt102 compatible but supports sixel)
     let term = std::env::var("TERM").unwrap_or_default();
     if term.starts_with("yaft") {
+        return Ok(true);
+    }
+
+    // Check for Ghostty via TERM_PROGRAM
+    let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
+    if term_program.to_lowercase().contains("ghostty") {
         return Ok(true);
     }
 
@@ -96,6 +103,7 @@ pub fn detect_sixel() -> Result<bool> {
         "alacritty",
         "mintty",
         "cygwin",
+        "ghostty",
     ];
 
     let term_lower = term.to_lowercase();
@@ -171,8 +179,27 @@ pub fn detect_geometry() -> Result<u32> {
         }
     }
 
+    // Try to get pixel width via escape sequence CSI 14 t
+    // This returns something like \x1b[4;height;widtht
+    if let Ok(response) = query_terminal("\x1b[14t", 100) {
+        let response_str = String::from_utf8_lossy(&response);
+        if let Some(width_part) = response_str.split(';').nth(2) {
+            let width_str: String = width_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(width) = width_str.parse::<u32>() {
+                if width > 0 {
+                    return Ok(width);
+                }
+            }
+        }
+    }
+
+    // Fallback: Try to use character width * estimated font width
+    if let Ok((cols, _)) = crossterm::terminal::size() {
+        // Assume a typical font width of 10-12 pixels
+        return Ok(cols as u32 * 12);
+    }
+
     // Use a reasonable default for modern terminals
-    // Most users have widescreen displays (1920px or wider)
     Ok(1920)
 }
 

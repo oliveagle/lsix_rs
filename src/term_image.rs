@@ -9,8 +9,20 @@ use ratatui::backend::CrosstermBackend;
 use ratatui_image::{picker::Picker, StatefulImage};
 use std::io::stdout;
 
+pub fn create_picker() -> Picker {
+    // Use from_query_stdio which should work fine when called after raw mode is enabled
+    match Picker::from_query_stdio() {
+        Ok(picker) => picker,
+        Err(_) => {
+            // Fallback to halfblocks if terminal query fails
+            Picker::halfblocks()
+        }
+    }
+}
+
+#[allow(dead_code)]
 pub fn render_single_image(image_path: &str) -> Result<()> {
-    let picker = Picker::from_query_stdio()?;
+    let picker = create_picker();
 
     let dyn_img = ImageReader::open(image_path)?
         .decode()
@@ -40,6 +52,7 @@ pub fn render_single_image(image_path: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn render_image_grid(image_paths: &[String], num_columns: u32) -> Result<()> {
     use ratatui::{
         layout::{Constraint, Direction, Layout, Rect},
@@ -47,7 +60,7 @@ pub fn render_image_grid(image_paths: &[String], num_columns: u32) -> Result<()>
         widgets::{Block, Borders, Paragraph},
     };
 
-    let picker = Picker::from_query_stdio()?;
+    let picker = create_picker();
 
     let images: Result<Vec<image::DynamicImage>> = image_paths
         .iter()
@@ -130,7 +143,7 @@ pub fn display_single_image_interactive(image_path: &str) -> Result<()> {
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen)?;
 
-    let picker = Picker::from_query_stdio()?;
+    let picker = create_picker();
 
     let dyn_img = ImageReader::open(image_path)?
         .decode()

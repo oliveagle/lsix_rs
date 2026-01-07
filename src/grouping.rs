@@ -1,3 +1,6 @@
+// Most functions in this module are planned features that are not yet fully utilized
+#![allow(dead_code)]
+
 use crate::ai_tagging::{AITaggingConfig, AITags};
 use crate::filter::ImageFeatures;
 use crate::image_proc::ImageEntry;
@@ -404,7 +407,7 @@ fn calculate_perceptual_hash(path: &str) -> Result<PerceptualHash> {
         .context("Failed to calculate perceptual hash")?;
 
     // Parse histogram to get average brightness
-    let text = String::from_utf8_lossy(&output.stdout);
+    let _text = String::from_utf8_lossy(&output.stdout);
 
     // Simplified hash: just use dimensions for now
     // A real implementation would analyze pixel values
@@ -565,7 +568,6 @@ fn get_dominant_color_name(_images: &[String]) -> String {
 /// List all tags with their image counts
 pub fn list_tag_statistics(image_paths: &[String], sort_by: &str) -> Result<()> {
     use std::collections::HashMap;
-    use std::io::Write;
 
     // Collect all tags and their counts
     let mut tag_counts: HashMap<String, usize> = HashMap::new();

@@ -9,21 +9,17 @@ mod tui_browser;
 
 use ai_tagging::{clear_ai_cache, tag_images_parallel, AITaggingConfig};
 use anyhow::{Context, Result};
-use term_image::render_image_grid;
 
 const BUILD_TIME: &str = include_str!(concat!(env!("OUT_DIR"), "/build_time.txt"));
 
 use clap::Parser;
 use filename::FilenameMode;
 use filter::{parse_file_size, parse_orientation, FilterConfig};
-use grouping::{group_images, GroupBy};
 use image_proc::{
-    expand_directories, expand_directories_recursive, process_images_concurrent,
-    process_images_grouped, validate_images_concurrent, ImageConfig,
+    expand_directories, expand_directories_recursive,
 };
 use std::io::{self, Write};
 use std::path::Path as StdPath;
-use std::process::Command;
 
 /// lsix: like ls, but for images.
 /// Shows thumbnails of images with titles directly in terminal.
@@ -145,33 +141,20 @@ fn cleanup() {
     // Send escape sequence to stop SIXEL
     eprint!("\x1b\\");
     io::stderr().flush().ok();
-
-    // Reset terminal to show characters
-    let _ = Command::new("stty").arg("echo").status();
-}
-
-/// Setup cleanup handlers
-fn setup_cleanup() -> Result<()> {
-    // Disable echo at start
-    let _ = Command::new("stty").arg("-echo").status();
-    Ok(())
 }
 
 /// Main function
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Setup terminal and cleanup
-    setup_cleanup()?;
-
     // Determine filename mode from command line argument
-    let filename_mode = match args.mode.as_str() {
+    let _filename_mode = match args.mode.as_str() {
         "long" => FilenameMode::Long,
         _ => FilenameMode::Short,
     };
 
     // Build filter config from command line arguments
-    let filter_config = FilterConfig {
+    let _filter_config = FilterConfig {
         min_width: args.min_width,
         max_width: args.max_width,
         min_height: args.min_height,
@@ -184,7 +167,7 @@ fn main() -> Result<()> {
     };
 
     // Auto-detect terminal capabilities (very fast now)
-    let term_config = terminal::autodetect().context("Terminal auto-detection failed")?;
+    let _term_config = terminal::autodetect().context("Terminal auto-detection failed")?;
 
     // Handle --clear-ai-cache
     if args.clear_ai_cache {
@@ -305,152 +288,19 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Handle --tui option
-    if args.tui {
-        // Auto-detect terminal capabilities (very fast now)
-        let _term_config = terminal::autodetect().context("Terminal auto-detection failed")?;
+    // Always use TUI browser mode for displaying images
+    eprintln!("Starting TUI browser mode...");
+    eprintln!("Found {} images to browse.", image_paths.len());
+    eprintln!("Build time: {}", BUILD_TIME.trim());
+    eprintln!("Use Arrow keys to navigate, Enter to view full size, q to quit");
 
-        // Get list of image files
-        let image_paths = if args.files.is_empty() {
-            // No arguments - find images in current directory
-            filename::find_image_files()
-        } else {
-            // Arguments provided - expand any directories
-            if args.recursive {
-                image_proc::expand_directories_recursive(&args.files)
-            } else {
-                image_proc::expand_directories(&args.files)
-            }
-        };
-
-        if image_paths.is_empty() {
-            eprintln!("No image files found.");
-            cleanup();
-            return Ok(());
-        }
-
-        eprintln!("Starting TUI browser mode...");
-        eprintln!("Found {} images to browse.", image_paths.len());
-        eprintln!("Build time: {}", BUILD_TIME.trim());
-        eprintln!("Use hjkl to navigate, +/- to resize thumbnails, q to quit");
-
-        // Run the TUI browser
-        if let Err(e) = tui_browser::run_tui_browser(image_paths) {
-            eprintln!("TUI browser error: {}", e);
-            cleanup();
-            return Err(anyhow::anyhow!("TUI browser failed: {}", e));
-        }
-
+    // Run the TUI browser
+    if let Err(e) = tui_browser::run_tui_browser(image_paths) {
+        eprintln!("TUI browser error: {}", e);
         cleanup();
-        return Ok(());
+        return Err(anyhow::anyhow!("TUI browser failed: {}", e));
     }
 
-    // Validate and process images concurrently with filtering
-    let images = validate_images_concurrent(
-        &image_paths,
-        !args.files.is_empty(),
-        filename_mode,
-        &filter_config,
-    );
-
-    if images.is_empty() {
-        eprintln!("No valid images to display.");
-        cleanup();
-        return Ok(());
-    }
-
-    // Handle --list-tags option
-    if args.list_tags {
-        use grouping::list_tag_statistics;
-        let image_paths: Vec<String> = images.iter().map(|img| img.path.clone()).collect();
-
-        eprintln!(
-            "\n╔════════════════════════════════════════════════════════════════════════════╗"
-        );
-        eprintln!(
-            "║                        Tag Statistics                                       ║"
-        );
-        eprintln!(
-            "╚════════════════════════════════════════════════════════════════════════════╝\n"
-        );
-
-        list_tag_statistics(&image_paths, &args.sort_tags_by)?;
-
-        eprintln!("\n💡 Tips:");
-        eprintln!("  --tag <TAG>           Show images with tag (OR logic)");
-        eprintln!("  --tag-and <TAG>       Must match all tags (AND logic)");
-        eprintln!("  --tag-not <TAG>       Exclude images with tag (NOT logic)");
-        eprintln!("  Example: --tag beach --tag-not blurry");
-        eprintln!("  --group-by tags       Group images by tag\n");
-
-        cleanup();
-        return Ok(());
-    }
-
-    let images = if !args.tag.is_empty() || !args.tag_and.is_empty() || !args.tag_not.is_empty() {
-        use grouping::filter_by_tags_advanced;
-        filter_by_tags_advanced(images, &args.tag, &args.tag_and, &args.tag_not)?
-    } else {
-        images
-    };
-
-    if images.is_empty() {
-        eprintln!("No images match the specified tag filters.");
-        cleanup();
-        return Ok(());
-    }
-
-    let group_strategy = match args.group_by.as_str() {
-        "similarity" => GroupBy::Similarity,
-        "color" => GroupBy::Color,
-        "size" => GroupBy::Size,
-        "time" => GroupBy::Time,
-        "tags" => GroupBy::Tags,
-        _ => GroupBy::None,
-    };
-
-    if group_strategy != GroupBy::None {
-        let image_paths: Vec<String> = images.iter().map(|img| img.path.clone()).collect();
-
-        eprintln!("Grouping images by {:?}...", args.group_by);
-        eprintln!("This may take a moment for analysis...");
-
-        let groups = group_images(&image_paths, group_strategy, args.similarity_threshold)
-            .context("Image grouping failed")?;
-
-        if groups.is_empty() {
-            eprintln!("No groups found.");
-            cleanup();
-            return Ok(());
-        }
-
-        eprintln!("Found {} group(s)", groups.len());
-
-        let img_config = ImageConfig::from_terminal_width(
-            term_config.width,
-            term_config.num_colors,
-            &term_config.background,
-            &term_config.foreground,
-        );
-        process_images_grouped(groups, images, &img_config)?;
-    } else {
-        let image_paths: Vec<String> = images.iter().map(|img| img.path.clone()).collect();
-        let num_columns = if let Ok(width_str) = std::env::var("LSIX_COLUMNS") {
-            width_str.parse().unwrap_or(3)
-        } else {
-            3
-        };
-
-        if let Err(e) = render_image_grid(&image_paths, num_columns) {
-            eprintln!("Error rendering images: {}", e);
-        }
-    }
-
-    // Skip the waiting part - just cleanup and exit
-    // The original script waits for terminal response, but it's not strictly necessary
-
-    // Cleanup
     cleanup();
-
     Ok(())
 }
